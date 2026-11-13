@@ -24,8 +24,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 NUMERIC = [
@@ -225,11 +224,12 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
     x_train, y_train = train_rows[features], train_rows['isFraud'].astype(int)
     baseline_transform = ColumnTransformer([
         ('numeric', Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True)),
-                              ('scale', StandardScaler(with_mean=False))]), nums),
+                              ('scale', StandardScaler(with_mean=False)),
+                              ('clip', FunctionTransformer(np.clip, kw_args={'a_min': -20, 'a_max': 20}))]), nums),
         ('category', OneHotEncoder(handle_unknown='infrequent_if_exist', min_frequency=100, max_categories=40), cats),
     ], sparse_threshold=.3)
     baseline = Pipeline([('preprocessing', baseline_transform),
-                         ('model', LogisticRegression(max_iter=1000, tol=1e-4, class_weight='balanced', solver='lbfgs'))])
+                         ('model', LogisticRegression(max_iter=1000, tol=1e-3, class_weight='balanced', solver='liblinear'))])
     with warnings.catch_warnings():
         warnings.filterwarnings('error', category=ConvergenceWarning)
         baseline.fit(x_train, y_train)
@@ -268,7 +268,8 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         'threshold': threshold,
         'validation_metrics': validation_metrics,
         'baseline_validation_metrics': baseline_validation_metrics,
-        'baseline_convergence': {'solver': 'lbfgs', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True},
+        'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True,
+                                 'numeric_preprocessing': 'train-fitted standard scaling and clipping to [-20,20]'},
         'threshold_analysis': analysis,
         'feature_importance': importance,
         'test_metrics': test_metrics,

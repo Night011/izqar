@@ -50,6 +50,8 @@ def test_both_trainers_create_separate_artifacts(tmp_path):
     assert 'TransactionID' not in ieee_report['features']
     assert 'isFraud' not in ieee_report['features']
     assert ieee_report['baseline_convergence']['converged'] is True
+    assert ieee_report['baseline_convergence']['solver'] == 'liblinear'
+    assert ieee_report['baseline_convergence']['iterations'] < ieee_report['baseline_convergence']['max_iter']
     assert ieee_report['feature_importance']['leakage_audit']
     experiment_model = tmp_path / 'experiments' / 'ieee_100.joblib'
     train_ieee(ieee_dir, experiment_model, n_estimators=8, max_rows=100, mode='experiment')
