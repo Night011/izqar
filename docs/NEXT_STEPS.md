@@ -2,11 +2,11 @@
 
 ## Сначала: Unified Intelligence в Kaggle
 
-1. Импортируйте `notebooks/unified_intelligence_kaggle.ipynb` в Kaggle.
+1. Notebook уже выполнен в Kaggle на commit `6f91892ac1062425f2a34a822dd617ee38f3b8cc`; не перезапускайте его ради подбора параметров.
 2. Через **Add Input** подключите: `ealaxi/paysim1`, `ieee-fraud-detection`, `sgpjesus/bank-account-fraud-dataset-neurips-2022`, `ealtman2019/ibm-transactions-for-anti-money-laundering-aml`. Условия IEEE-CIS принимает только владелец аккаунта.
 3. Включите Internet только для клонирования feature-ветки и зависимостей. Исходные CSV не скачивать в локальный репозиторий.
-4. Выполните notebook. Он использует validation-only периоды и создаёт `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` в `/kaggle/working/izqar_unified_mtl_v1`.
-5. Сохраните вывод ячеек, commit SHA, размеры выборок, validation метрики, `gradient_audit_shared_backbone_l2`, `training.seconds` и `unified_checkpoint.pt`. До сравнения не называйте модель лучше специализированных.
+4. В завершённой сессии скачайте из `/kaggle/working/izqar_unified_mtl_v1` `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` и `unified_checkpoint.pt`. При необходимости создайте ZIP только из этих четырёх файлов.
+5. Сохраните вывод ячеек, commit SHA, размеры выборок, validation метрики, `gradient_audit_shared_backbone_l2`, `training.seconds` и checkpoint. До сравнения не называйте модель лучше специализированных.
 
 ## После экспорта
 
@@ -32,6 +32,6 @@ cd ..\frontend
 npm run build
 ```
 
-## Незакоммиченные на момент этого документа
+## Текущий handoff
 
-Unified training script, Kaggle notebook, Unified API integration, статусы и тесты. Перед следующей крупной задачей нужно завершить проверки, создать Conventional Commit и push feature-ветки.
+Kaggle вкладка оставлена открытой с успешным validation-only output и четырьмя файлами в `/kaggle/working/izqar_unified_mtl_v1`. Локально требуется только доверенный экспорт артефактов; `.vscode/` остаётся пользовательским неотслеживаемым каталогом.
