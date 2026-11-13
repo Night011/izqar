@@ -18,6 +18,7 @@
 - Backend: четыре специализированных endpoint-инференса; очередь расследований, статусы, комментарии и append-only `investigation_events` для синтетических переводов.
 - Unified endpoint: `POST /api/v1/unified/{paysim|ieee_cis|baf_base|ibm_aml}/predict` подготовлен, но честно возвращает 503 до установки совместно обученного артефакта.
 - Локальная проверка: 36 backend-тестов прошли; React build прошёл. В том числе проверены Unified adapter protocol, NumPy shared-backbone inference, 503 при отсутствии артефакта и загрузка тестового доверенного экспорта.
+- Последняя проверка реальной локальной конфигурации: `/api/v1/model/status` и `/api/v1/model/registry` вернули 200; PaySim, IEEE-CIS, BAF Base и IBM AML загрузились, в registry 17 активных и исторических отчётов. После добавления лимита тела API полный тестовый набор вырос до 38 успешных тестов.
 
 ## Последние проверенные коммиты
 
