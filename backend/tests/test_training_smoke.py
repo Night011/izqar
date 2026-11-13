@@ -11,6 +11,8 @@ pytest.importorskip('xgboost')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_ieee import train as train_ieee  # noqa: E402
 from train_paysim import train as train_paysim  # noqa: E402
+from audit_ieee_validation import audit as audit_ieee_validation  # noqa: E402
+from audit_paysim_validation import audit as audit_paysim_validation  # noqa: E402
 
 
 def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeypatch):
@@ -35,12 +37,19 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert pay_report['baseline_convergence']['converged'] is True
     assert pay_report['feature_importance']['top_30']
     assert all('isFraud' not in row['feature'] and 'newbalance' not in row['feature'] for row in pay_report['feature_importance']['top_30'])
+    with pytest.raises(FileExistsError, match='Output already exists'):
+        train_paysim(paysim_path, pay_model, 8, None)
+    pay_audit = audit_paysim_validation(paysim_path, pay_model, tmp_path / 'paysim_validation_audit.json')
+    assert pay_audit['analysis_source'] == 'frozen_paysim_validation_only'
+    assert pay_audit['cases'] == pay_report['split_counts']['validation']
+    assert 'test_metrics' not in pay_audit
 
     ieee_dir = tmp_path / 'ieee'
     ieee_dir.mkdir()
     pd.DataFrame({
         'TransactionID': range(1000, 1000 + rows), 'TransactionDT': range(rows),
         'TransactionAmt': [float(10 + i % 30) for i in range(rows)],
+        'C3': [float(i % 5) for i in range(rows)], 'V4': [float(i % 3) for i in range(rows)],
         'ProductCD': ['W' if i % 2 else 'C' for i in range(rows)],
         'isFraud': [int(i % 10 == 0) for i in range(rows)],
     }).to_csv(ieee_dir / 'train_transaction.csv', index=False)
@@ -65,6 +74,18 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert experiment_report['split_boundaries'] == ieee_report['split_boundaries']
     assert experiment_report['split_counts']['final_test'] == ieee_report['split_counts']['final_test']
     assert experiment_report['split_counts']['train_used'] == 100
+    extended_path = tmp_path / 'ieee_extended.joblib'
+    train_ieee(ieee_dir, extended_path, 8, 100, 'experiment', feature_set='extended_cv')
+    extended_report = json.loads(extended_path.with_suffix('.metrics.json').read_text(encoding='utf-8'))
+    assert {'C3', 'V4'} <= set(extended_report['features'])
+    assert extended_report['test_metrics'] is None
+    assert not extended_path.exists()
+    audit_path = tmp_path / 'ieee_validation_audit.json'
+    audit_report = audit_ieee_validation(ieee_dir, ieee_model, audit_path)
+    assert audit_report['analysis_source'] == 'frozen_ieee_validation_only'
+    assert audit_report['cases'] == ieee_report['split_counts']['validation']
+    assert 'test_metrics' not in audit_report
+    assert audit_report['precision_at_100'] >= 0
     import app.ml as ml
     with monkeypatch.context() as patch:
         patch.setattr(ml, 'MODEL_PATH', ieee_model)

@@ -1,27 +1,53 @@
-"""Independently trained IEEE-CIS model. No synthetic transfers fed to IEEE model."""
+"""Trusted, separately versioned fraud models and strict inference schemas."""
 from functools import lru_cache
 from pathlib import Path
+import json
 import joblib
+import sklearn
 from .config import MODEL_PATH, PAYSIM_MODEL_PATH
+
+
+def _load_artifact(path: Path, expected_kind: str):
+    if not path.is_file():
+        return None
+    # A sidecar is readable without executing pickle code. Reject known version
+    # mismatches before joblib.load; sklearn does not support cross-version loads.
+    report_path = path.with_suffix('.metrics.json')
+    if report_path.is_file():
+        try:
+            report = json.loads(report_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f'Invalid {expected_kind} model metadata') from exc
+        if report.get('model_kind') != expected_kind:
+            raise RuntimeError(f'Incorrect {expected_kind} model kind in metadata')
+        trained_version = report.get('library_versions', {}).get('scikit_learn')
+        if trained_version and trained_version != sklearn.__version__:
+            raise RuntimeError(
+                f'{expected_kind} requires scikit-learn {trained_version}; runtime has {sklearn.__version__}. '
+                'Use a compatible artifact or retrain with matching versions.'
+            )
+    try:
+        artifact = joblib.load(path)
+    except Exception as exc:
+        raise RuntimeError(f'Unable to load {expected_kind} model artifact ({type(exc).__name__})') from exc
+    if (not isinstance(artifact, dict) or artifact.get('format_version') != 2
+            or artifact.get('model_kind') != expected_kind or not artifact.get('features')
+            or 'pipeline' not in artifact or 'threshold' not in artifact):
+        raise RuntimeError(f'Unsupported {expected_kind} model artifact format')
+    trained_version = artifact.get('library_versions', {}).get('scikit_learn')
+    if trained_version and trained_version != sklearn.__version__:
+        raise RuntimeError(f'{expected_kind} artifact requires scikit-learn {trained_version}; runtime has {sklearn.__version__}')
+    return artifact
+
 
 @lru_cache(maxsize=1)
 def load_model():
-    if not Path(MODEL_PATH).is_file():
-        return None
-    artifact = joblib.load(MODEL_PATH)
-    if artifact.get('format_version') != 2 or artifact.get('model_kind') != 'ieee_cis' or not artifact.get('features'):
-        raise RuntimeError('Unsupported model artifact format')
-    return artifact
+    return _load_artifact(Path(MODEL_PATH), 'ieee_cis')
 
 
 @lru_cache(maxsize=1)
 def load_paysim_model():
-    if not PAYSIM_MODEL_PATH.is_file():
-        return None
-    artifact = joblib.load(PAYSIM_MODEL_PATH)
-    if artifact.get('format_version') != 2 or artifact.get('model_kind') != 'paysim' or not artifact.get('features'):
-        raise RuntimeError('Unsupported PaySim model artifact format')
-    return artifact
+    return _load_artifact(PAYSIM_MODEL_PATH, 'paysim')
 
 
 def predict_ieee(features: dict):

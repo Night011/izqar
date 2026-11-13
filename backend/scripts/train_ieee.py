@@ -33,6 +33,7 @@ NUMERIC = [
     'C11', 'C12', 'C13', 'C14', 'D1', 'D2', 'D3', 'D4', 'D5', 'D10', 'D15',
     'V1', 'V2', 'V3',
 ]
+EXTENDED_NUMERIC = ['C3', 'C5', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10']
 CATEGORICAL = [
     'ProductCD', 'card4', 'card6', 'P_emaildomain', 'R_emaildomain',
     'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'DeviceType', 'DeviceInfo', 'id_31',
@@ -143,9 +144,14 @@ def choose_threshold(y_true, scores):
 
 
 def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None = None,
-          mode: str = 'final', max_false_alerts_per_10000: float | None = None):
+          mode: str = 'final', max_false_alerts_per_10000: float | None = None,
+          feature_set: str = 'core'):
     if mode not in {'experiment', 'final'} or n_estimators < 1:
         raise ValueError('mode must be experiment or final; estimators must be positive')
+    if feature_set not in {'core', 'extended_cv'}:
+        raise ValueError('feature_set must be core or extended_cv')
+    if mode == 'final' and feature_set != 'core':
+        raise ValueError('The existing final test has been inspected; extended_cv is validation-only until a new independent holdout is available')
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
     tx_path = data_dir / 'train_transaction.csv'
@@ -156,8 +162,9 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
     required = {'TransactionID', 'TransactionDT', 'TransactionAmt', 'isFraud'}
     if missing := (required - tx_columns):
         raise ValueError(f'Missing required columns: {sorted(missing)}')
-    tx_usecols = sorted((tx_columns & set(NUMERIC + CATEGORICAL)) | required)
-    numeric_columns = set(NUMERIC) & set(tx_usecols)
+    requested_numeric = NUMERIC + (EXTENDED_NUMERIC if feature_set == 'extended_cv' else [])
+    tx_usecols = sorted((tx_columns & set(requested_numeric + CATEGORICAL)) | required)
+    numeric_columns = set(requested_numeric) & set(tx_usecols)
     dtype = {name: 'float32' for name in numeric_columns}
     dtype.update({'TransactionID': 'int64', 'TransactionDT': 'float64', 'isFraud': 'int8'})
     data = pd.read_csv(tx_path, usecols=tx_usecols, dtype=dtype, low_memory=False)
@@ -188,7 +195,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         for column in usecols:
             if column != 'TransactionID':
                 data[column] = pd.NA
-    nums = [column for column in NUMERIC if column in data]
+    nums = [column for column in requested_numeric if column in data]
     cats = [column for column in CATEGORICAL if column in data]
     features = nums + cats
     for col in nums:
@@ -255,6 +262,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         'model_kind': 'ieee_cis',
         'model_version': 'ieee-cis-xgboost-v2',
         'run_mode': mode,
+        'feature_set': feature_set,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'IEEE-CIS Fraud Detection (Kaggle competition)',
         'data_files': [file_provenance(tx_path), file_provenance(id_path)],
@@ -298,6 +306,8 @@ def main():
     parser.add_argument('--mode', choices=['experiment', 'final'], default='experiment')
     parser.add_argument('--max-train-rows', type=int, default=None, help='Use most recent N rows inside the fixed train window')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=None, help='Validation constraint; otherwise maximize F1')
+    parser.add_argument('--feature-set', choices=['core', 'extended_cv'], default='core',
+                        help='Candidate extended C/V features; evaluate in experiment mode before any final use')
     args = parser.parse_args()
     if args.max_train_rows is not None and args.max_train_rows < 100:
         parser.error('--max-train-rows must be at least 100')
@@ -305,7 +315,8 @@ def main():
         parser.error('Experiments require a distinct --output path under models/experiments/')
     if args.mode == 'final' and args.max_train_rows is not None:
         parser.error('Final run uses all rows in the fixed train window')
-    train(args.data_dir, args.output, args.estimators, args.max_train_rows, args.mode, args.max_false_alerts_per_10000)
+    train(args.data_dir, args.output, args.estimators, args.max_train_rows, args.mode,
+          args.max_false_alerts_per_10000, args.feature_set)
 
 if __name__ == '__main__':
     main()

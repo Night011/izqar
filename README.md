@@ -79,6 +79,14 @@ python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_final_v2.
 
 Для экспериментов 100k/200k/300k сначала прочитай [протокол оценки](docs/IEEE_EVALUATION.md). `--max-train-rows` меняет только обучающий сегмент; validation и финальный test остаются фиксированными. Режим `experiment` не рассчитывает метрики финального test и сохраняет только validation-отчёт.
 
+Ограниченный эксперимент с дополнительными C/V-признаками, без доступа к финальному test:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_ieee.py --data-dir data\ieee --mode experiment --feature-set extended_cv --estimators 180 --output models\experiments\ieee_extended_cv_NEW.joblib
+```
+
+Режим `final` для `extended_cv` намеренно заблокирован: прежний финальный test уже просматривался. Протокол и результаты аудита: [docs/MULTIDATA_AUDIT.md](docs/MULTIDATA_AUDIT.md).
+
 Выход: `models/ieee_final_v2.joblib` и `models/ieee_final_v2.metrics.json` с настоящими метриками отложенной части **IEEE-CIS**. Отчёт включает baseline и XGBoost, Precision, Recall, F1, PR-AUC, ROC-AUC, матрицу ошибок, FPR/FNR и ложные тревоги на 10 000 операций. Артефакт модели содержит сериализованный объект Python (`joblib`); загружай только собственные/доверенные файлы. Для использования нового файла в API установи `IZQAR_MODEL_PATH` на его путь и перезапусти API. Скрипт не перезаписывает прежние результаты.
 
 ## Обучение модели PaySim
@@ -100,6 +108,8 @@ PaySim и IEEE-CIS не объединяются и не сравниваютс�
 Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.
 
 В PaySim запусти все ячейки. В IEEE сначала запусти ячейки экспериментов и изучи validation-отчёты; финальная ячейка по умолчанию отключена (`RUN_FINAL = False`). После фиксации параметров и стратегии порога выставь `RUN_FINAL = True` и запусти её один раз. В `/kaggle/working` появятся `izqar_paysim_artifacts.zip` и `izqar_ieee_artifacts.zip`; каждый содержит `.joblib` со схемой, preprocessing и порогом, а также `.metrics.json` с фактическими validation/test метриками после финального запуска. Скачай ZIP из Output и распакуй проверенные артефакты в `backend/models/` на локальном IZQAR. Устанавливай совместимые версии Python и ML-библиотек при загрузке; `joblib` допускается только из доверенного собственного запуска. Перезапусти API после установки моделей. CSV остаются в Kaggle и не копируются в репозиторий. Для PaySim путь по умолчанию — `backend/models/paysim_model.joblib`; IEEE-CIS берёт путь из `IZQAR_MODEL_PATH` или `backend/models/ieee_model.joblib`.
+
+**Совместимость существующих результатов.** Первоначальный полный PaySim-артефакт был обучен с scikit-learn 1.6.1, тогда как локальный IEEE-CIS артефакт и окружение API используют 1.9.1. `joblib` не гарантирует загрузку между версиями; локальный API сообщает о несовместимости и возвращает 503 для PaySim. Исходный `paysim_model.joblib` и его отчёт сохраняются. Для нового совместимого файла используй [PaySim v2 notebook](notebooks/paysim_compatible_kaggle.ipynb): он повторяет **те же зафиксированные параметры** с scikit-learn 1.9.1 и пишет отдельные `paysim_model_v2.joblib`, `.metrics.json` и `izqar_paysim_artifacts_v2.zip`. Установи `IZQAR_PAYSIM_MODEL_PATH` на локальный путь к `paysim_model_v2.joblib` в `.env` и перезапусти API. Повторная оценка на прежнем test — проверка воспроизводимости/совместимости, а не новый независимый эксперимент; для подбора улучшений используй только validation.
 
 Для импорта PaySim ноутбука через веб-интерфейс Kaggle: **Code → New Notebook → Import Notebook → GitHub** и выбери `Night011/izqar`, ветку `feat/ml-pipelines-and-startup`, файл `notebooks/paysim_kaggle.ipynb`. Затем **Add Input → ealaxi/paysim1**. Если импорт локального файла через расширение Chrome заблокирован, включи доступ к file URLs в настройках расширения либо используй импорт из GitHub. Потребуется включить Internet в настройках Kaggle Notebook для `git clone` и установки пакетов. Не принимай правила конкурса IEEE-CIS от имени другого пользователя.
 

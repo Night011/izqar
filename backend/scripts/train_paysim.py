@@ -80,7 +80,12 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
     return data.sort_values('step', kind='stable').reset_index(drop=True)
 
 
-def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None):
+def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None,
+          model_version: str = 'paysim-xgboost-v1'):
+    if output.exists() or output.with_suffix('.metrics.json').exists():
+        raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
+    if not model_version.startswith('paysim-xgboost-v') or not model_version.removeprefix('paysim-xgboost-v').isdigit():
+        raise ValueError('model_version must have the form paysim-xgboost-vN')
     if not data_path.is_file():
         raise FileNotFoundError(f'Missing {data_path}. Download PaySim manually from Kaggle and keep it outside Git.')
     data = read_paysim(data_path, max_rows)
@@ -122,7 +127,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     threshold = choose_threshold(valid_rows['isFraud'].astype(int), valid_scores)
     test_scores = pipeline.predict_proba(test_rows[FEATURES])[:, 1]
     artifact = {
-        'format_version': 2, 'model_kind': 'paysim', 'model_version': 'paysim-xgboost-v1',
+        'format_version': 2, 'model_kind': 'paysim', 'model_version': model_version,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(), 'dataset': 'PaySim (synthetic Kaggle dataset)',
         'data_files': [file_provenance(data_path)],
         'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
@@ -155,10 +160,11 @@ def main():
     parser.add_argument('--estimators', type=int, default=180)
     parser.add_argument('--max-rows', type=int, default=500_000, help='Default memory cap: 500000 chronological CSV rows')
     parser.add_argument('--full-data', action='store_true', help='Explicitly opt into loading the entire CSV in RAM')
+    parser.add_argument('--model-version', default='paysim-xgboost-v1', help='Version identifier saved with the artifact')
     args = parser.parse_args()
     if args.max_rows is not None and args.max_rows < 100:
         parser.error('--max-rows must be at least 100')
-    train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows)
+    train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows, args.model_version)
 
 
 if __name__ == '__main__':

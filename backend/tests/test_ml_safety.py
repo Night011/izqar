@@ -11,6 +11,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_paysim import FEATURES, read_paysim  # noqa: E402
 
 
+def test_incompatible_artifact_is_reported_without_unpickling(tmp_path, client, auth, monkeypatch):
+    import json
+    import app.ml as ml
+    model = tmp_path / 'paysim_model.joblib'
+    model.write_bytes(b'not a pickle')
+    model.with_suffix('.metrics.json').write_text(json.dumps({
+        'model_kind': 'paysim', 'library_versions': {'scikit_learn': '0.0.0'},
+    }), encoding='utf-8')
+    with monkeypatch.context() as patch:
+        patch.setattr(ml, 'PAYSIM_MODEL_PATH', model)
+        patch.setattr(ml.joblib, 'load', lambda *_: pytest.fail('must reject before unpickling'))
+        ml.load_paysim_model.cache_clear()
+        status = client.get('/api/v1/model/status', headers=auth)
+        assert status.status_code == 200
+        assert 'requires scikit-learn' in status.json()['artifact_errors']['paysim']
+        response = client.post('/api/v1/paysim/predict', json={'features': {
+            'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0,
+        }}, headers=auth)
+        assert response.status_code == 503
+    ml.load_paysim_model.cache_clear()
+
+
 def test_paysim_feature_contract_excludes_post_event_and_identity_fields():
     forbidden = {'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'}
     assert not forbidden.intersection(FEATURES)
