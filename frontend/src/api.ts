@@ -51,6 +51,15 @@ export interface ModelPrediction {
   risk_score: number; threshold: number; flagged: boolean; source: string;
   model_version: string; score_kind: string; warning: string;
 }
+export interface RegistryEntry {
+  manifest: string; active_for: string | null; state: 'installed' | 'report_only' | 'invalid'; error?: string | null;
+  model_kind?: string; model_version?: string; dataset?: string; trained_at_utc?: string;
+  manifest_sha256?: string; feature_count?: number;
+  data_files?: { filename: string; size_bytes?: number; sha256?: string }[];
+  components?: { filename: string; bytes: number; sha256: string }[];
+  validation_metrics?: TestMetrics | null; test_metrics?: TestMetrics | null;
+}
+export interface ModelRegistry { registry_version: number; entries: RegistryEntry[]; note: string }
 
 const ROOT = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 export async function request<T>(path: string, key: string, options: RequestInit = {}): Promise<T> {

@@ -179,6 +179,7 @@ docker compose up --build
 | GET | `/api/v1/graph` | Граф счетов и индикаторы fan-in/out |
 | POST | `/api/v1/demo/simulate` | Запуск одного из пяти сценариев |
 | GET | `/api/v1/model/status` | Состояние отдельных ML-моделей, версии, схемы и реальные метрики установленных артефактов |
+| GET | `/api/v1/model/registry` | Активные модели и локальная история отчётов: схемы, происхождение, контрольные суммы и состояние файлов; требует API-ключ |
 | POST | `/api/v1/ieee/predict` | ML-скор записи IEEE-CIS (после обучения) |
 | POST | `/api/v1/paysim/predict` | ML-скор совместимой записи PaySim (после обучения) |
 | POST | `/api/v1/baf/predict` | ML-скор заявки BAF Base (после обучения) |

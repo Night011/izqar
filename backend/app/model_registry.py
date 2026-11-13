@@ -1,0 +1,102 @@
+"""Read-only inventory of local ML reports; never deserialize model payloads."""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+from pathlib import Path
+
+MAX_REPORT_BYTES = 2 * 1024 * 1024
+MAX_ENTRIES = 100
+KINDS = {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml'}
+FORBIDDEN = {'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest',
+             'TransactionID', 'TransactionDT', 'fraud_bool', 'Is Laundering',
+             'Account', 'Account.1'}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _report_path(path: Path) -> Path:
+    return path if path.name.endswith('.metrics.json') else path.with_suffix('.metrics.json')
+
+
+def _components(report_path: Path, report: dict) -> list[Path]:
+    stem = report_path.name.removesuffix('.metrics.json')
+    if report.get('format_version') == 3 and report.get('serialization') == 'portable_xgboost_v1':
+        return [report_path.with_name(stem + '.preprocessor.joblib'),
+                report_path.with_name(stem + '.xgboost.json')]
+    if report.get('format_version') == 2:
+        return [report_path.with_name(stem + '.joblib')]
+    return []
+
+
+def _entry(report_path: Path, active_kind: str | None) -> dict:
+    result = {'manifest': report_path.name, 'active_for': active_kind,
+              'state': 'invalid', 'error': None}
+    try:
+        if not report_path.is_file():
+            raise ValueError('metadata missing')
+        if report_path.stat().st_size > MAX_REPORT_BYTES:
+            raise ValueError('metadata exceeds size limit')
+        report = json.loads(report_path.read_text(encoding='utf-8'))
+        kind = report.get('model_kind')
+        if kind not in KINDS or (active_kind is not None and kind != active_kind):
+            raise ValueError('model kind mismatch')
+        features = report.get('features')
+        if not isinstance(features, list) or not features or any(not isinstance(x, str) for x in features):
+            raise ValueError('invalid feature schema')
+        if len(set(features)) != len(features) or set(features) & FORBIDDEN:
+            raise ValueError('forbidden or duplicate model feature')
+        threshold = report.get('threshold')
+        if not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise ValueError('invalid threshold')
+        files = _components(report_path, report)
+        if not files:
+            raise ValueError('unsupported artifact format')
+        components = [{'filename': path.name, 'bytes': path.stat().st_size, 'sha256': _sha256(path)}
+                      for path in files if path.is_file()]
+        result.update({'model_kind': kind, 'model_version': report.get('model_version'),
+                       'dataset': report.get('dataset'), 'trained_at_utc': report.get('trained_at_utc'),
+                       'format_version': report.get('format_version'), 'feature_count': len(features),
+                       'features': features, 'threshold': threshold,
+                       'data_files': report.get('data_files', []),
+                       'split_counts': report.get('split_counts', {}),
+                       'validation_metrics': report.get('validation_metrics'),
+                       'test_metrics': report.get('test_metrics'),
+                       'manifest_sha256': _sha256(report_path), 'components': components,
+                       'state': 'installed' if len(components) == len(files) else 'report_only'})
+        if len(components) != len(files):
+            result['error'] = 'model component missing; report alone is not an installed model'
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        result['error'] = str(exc)
+    return result
+
+
+def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
+    """Inventory active and archived reports without trusting their pickle bytes."""
+    entries = []
+    seen = set()
+    for kind, path in active_paths.items():
+        report_path = _report_path(path)
+        seen.add(report_path.resolve())
+        entries.append(_entry(report_path, kind))
+    if model_root.is_dir():
+        root = model_root.resolve()
+        for report_path in sorted(model_root.rglob('*.metrics.json')):
+            resolved = report_path.resolve()
+            if resolved in seen or not resolved.is_relative_to(root) or len(entries) >= MAX_ENTRIES:
+                continue
+            seen.add(resolved)
+            entries.append(_entry(report_path, None))
+    active = [item for item in entries if item['active_for'] is not None]
+    history = [item for item in entries if item['active_for'] is None]
+    history.sort(key=lambda item: (str(item.get('trained_at_utc') or ''), item['manifest']),
+                 reverse=True)
+    return {'registry_version': 1, 'entries': active + history,
+            'note': 'Metrics are read from trusted local training reports; checksums verify file identity, not model quality.'}

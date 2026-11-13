@@ -8,12 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from .config import API_KEY, CORS_ORIGINS, validate_config
+from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, validate_config
 from .database import Base, engine, get_db
 from .models import Transaction
 from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn
 from .risk import assess
 from .graph import build_graph
+from .model_registry import list_registry
 from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml
 
 @asynccontextmanager
@@ -129,6 +130,13 @@ def model_status():
             'ibm_aml': summary(ibm_aml),
             'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf or ibm_aml) and not (ieee_error or paysim_error or baf_error or ibm_aml_error) else None,
             'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error, 'ibm_aml': ibm_aml_error}}
+
+
+@app.get('/api/v1/model/registry', dependencies=[Depends(require_key)])
+def model_registry():
+    return list_registry({'ieee_cis': MODEL_PATH, 'paysim': PAYSIM_MODEL_PATH,
+                          'baf_base': BAF_MODEL_PATH, 'ibm_aml': IBM_AML_MODEL_PATH},
+                         BACKEND_ROOT / 'models')
 
 @app.post('/api/v1/ieee/predict', dependencies=[Depends(require_key)])
 def ieee_predict(payload: IeeeFeaturesIn):

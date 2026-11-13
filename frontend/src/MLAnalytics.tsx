@@ -1,10 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { request } from './api';
-import type { ModelDetail, ModelPrediction, ModelStatus } from './api';
+import type { ModelDetail, ModelPrediction, ModelRegistry, ModelStatus, RegistryEntry } from './api';
 import './ml-analytics.css';
+import './model-registry.css';
 
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const examplePaySim = JSON.stringify({ type: 'TRANSFER', amount: 150000, oldbalanceOrg: 180000, oldbalanceDest: 20000 }, null, 2);
+const names: Record<string, string> = { paysim: 'PaySim', ieee_cis: 'IEEE-CIS', baf_base: 'BAF Base', ibm_aml: 'IBM AML' };
+
+function RegistryRow({ entry }: { entry: RegistryEntry }) {
+  const label = entry.state === 'installed' ? 'Артефакт установлен' : entry.state === 'report_only' ? 'Только отчёт' : 'Ошибка метаданных';
+  return <tr><td><strong>{names[entry.model_kind ?? entry.active_for ?? ''] ?? entry.model_kind ?? 'Неизвестная модель'}</strong><small>{entry.active_for ? 'Активная' : 'История'}</small></td>
+    <td>{entry.model_version ?? '—'}</td><td>{label}{entry.error && <small>{entry.error}</small>}</td>
+    <td>{entry.test_metrics ? `F1 ${entry.test_metrics.f1.toFixed(3)} · PR-AUC ${entry.test_metrics.average_precision_pr_auc.toFixed(3)}` : 'Нет test-метрик'}</td>
+    <td><details><summary>Происхождение</summary><p>{entry.dataset ?? 'Источник не указан'}</p><p>Манифест: {entry.manifest}</p><p>SHA-256: {entry.manifest_sha256 ?? '—'}</p>
+      {entry.data_files?.map(file => <p key={file.filename}>Данные: {file.filename} · SHA-256 {file.sha256 ?? 'не указан'}</p>)}
+      {entry.components?.map(file => <p key={file.filename}>Компонент: {file.filename} · SHA-256 {file.sha256}</p>)}</details></td></tr>;
+}
 
 function ModelCard({ title, detail, error }: { title: string; detail?: ModelDetail | null; error?: string | null }) {
   if (!detail) return <section className="panel ml-card"><h2>{title}</h2><p>{error ? `Ошибка артефакта: ${error}` : 'Обученный артефакт не установлен'}</p></section>;
@@ -29,6 +41,14 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
   const [result, setResult] = useState<ModelPrediction | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [registry, setRegistry] = useState<ModelRegistry | null>(null);
+  const [registryError, setRegistryError] = useState('');
+  useEffect(() => {
+    let mounted = true;
+    request<ModelRegistry>('/api/v1/model/registry', apiKey).then(data => { if (mounted) { setRegistry(data); setRegistryError(''); } })
+      .catch((exc: Error) => { if (mounted) setRegistryError(exc.message); });
+    return () => { mounted = false; };
+  }, [apiKey, status]);
   const detail = status?.[kind];
   const changeKind = (next: 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml') => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
   const template = () => setInput(JSON.stringify(Object.fromEntries((detail?.feature_names ?? []).map(name => [name,
@@ -48,6 +68,14 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
   return <div className="ml-page">
     <p className="ml-note">Метрики получены из сохранённых артефактов соответствующих датасетов. Демо-транзакции в журнале оценивает отдельный Rule Engine.</p>
     <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /><ModelCard title="IBM AML · синтетические операции" detail={status?.ibm_aml} error={status?.artifact_errors?.ibm_aml} /></div>
+    <section className="panel ml-card"><h2>Model Registry</h2><p>Активные артефакты и история экспериментов. Контрольные суммы подтверждают идентичность файлов, а метрики взяты из сохранённых отчётов.</p>
+      {registryError && <p className="ml-error">Ошибка реестра: {registryError}</p>}
+      {registry && <><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Test</th><th>Аудит</th></tr></thead><tbody>
+        {registry.entries.filter(entry => entry.active_for).map(entry => <RegistryRow key={`${entry.active_for}-${entry.manifest}`} entry={entry} />)}
+      </tbody></table></div><details className="registry-history"><summary>История отчётов ({registry.entries.filter(entry => !entry.active_for).length})</summary><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Test</th><th>Аудит</th></tr></thead><tbody>
+        {registry.entries.filter(entry => !entry.active_for).map(entry => <RegistryRow key={entry.manifest} entry={entry} />)}
+      </tbody></table></div></details></>}
+    </section>
     <section className="panel ml-card"><h2>Проверка ML-инференса</h2><p>Введите поля именно выбранной модели. Примерные значения в шаблоне служат только технической проверке API.</p>
       <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml')}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option><option value="baf_base">BAF Base</option><option value="ibm_aml">IBM AML</option></select><button type="button" onClick={template} disabled={!detail}>Шаблон признаков</button></div>
       <textarea aria-label="JSON признаков" spellCheck={false} value={input} onChange={e => setInput(e.target.value)} rows={9} />
