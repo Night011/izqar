@@ -7,14 +7,18 @@ not model features. Splits are chronological by step (70/15/15).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
+import xgboost
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -27,6 +31,14 @@ FEATURES = ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
 NUMERIC = ['amount', 'oldbalanceOrg', 'oldbalanceDest']
 CATEGORICAL = ['type']
 REQUIRED = {'step', 'type', 'amount', 'oldbalanceOrg', 'oldbalanceDest', 'isFraud'}
+
+
+def file_provenance(path: Path) -> dict:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return {'filename': path.name, 'size_bytes': path.stat().st_size, 'sha256': digest.hexdigest()}
 
 
 def evaluate(y_true, scores, threshold):
@@ -96,6 +108,9 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     artifact = {
         'format_version': 2, 'model_kind': 'paysim', 'model_version': 'paysim-xgboost-v1',
         'trained_at_utc': datetime.now(timezone.utc).isoformat(), 'dataset': 'PaySim (synthetic Kaggle dataset)',
+        'data_files': [file_provenance(data_path)],
+        'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
+        'split_counts': {'train': len(train_rows), 'validation': len(valid_rows), 'test': len(test_rows)},
         'features': FEATURES, 'numerical_features': NUMERIC, 'categorical_features': CATEGORICAL, 'pipeline': pipeline,
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
         'test_metrics': evaluate(test_rows['isFraud'].astype(int), test_scores, threshold),

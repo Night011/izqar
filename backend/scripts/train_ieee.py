@@ -5,14 +5,18 @@ It doesn't imply real-world fraud performance or calibrated probabilities.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
+import xgboost
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -31,6 +35,14 @@ CATEGORICAL = [
     'ProductCD', 'card4', 'card6', 'P_emaildomain', 'R_emaildomain',
     'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'DeviceType', 'DeviceInfo', 'id_31',
 ]
+
+
+def file_provenance(path: Path) -> dict:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return {'filename': path.name, 'size_bytes': path.stat().st_size, 'sha256': digest.hexdigest()}
 
 
 def metrics(y_true, scores, threshold):
@@ -133,6 +145,9 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None)
         'model_version': 'ieee-cis-xgboost-v1',
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'IEEE-CIS Fraud Detection (Kaggle competition)',
+        'data_files': [file_provenance(tx_path), file_provenance(id_path)],
+        'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
+        'split_counts': {'train': len(train_rows), 'validation': len(valid_rows), 'test': len(test_rows)},
         'pipeline': pipeline,
         'features': features,
         'numerical_features': nums,

@@ -36,8 +36,17 @@ $python = Join-Path $backend '.venv\Scripts\python.exe'
 if (-not (Test-Path $python)) { throw "Virtual environment creation failed: $python was not found." }
 & $python -m pip install -r requirements-core.txt
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
+$portCheck = [System.Net.Sockets.TcpClient]::new()
+try {
+  $portCheck.Connect('127.0.0.1', 8000)
+  throw 'Port 8000 is already in use. Stop the existing service before starting IZQAR.'
+} catch [System.Net.Sockets.SocketException] {
+  # Connection refused means the port is free.
+} finally {
+  $portCheck.Dispose()
+}
 Write-Host 'Starting IZQAR API and waiting for health check...' -ForegroundColor Cyan
-$server = Start-Process -FilePath $python -ArgumentList @('-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000','--reload') -WorkingDirectory $backend -PassThru -NoNewWindow
+$server = Start-Process -FilePath $python -ArgumentList @('-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000') -WorkingDirectory $backend -PassThru -WindowStyle Hidden
 try {
   $ready = $false
   foreach ($attempt in 1..30) {

@@ -94,6 +94,12 @@ python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_l
 
 PaySim и IEEE-CIS не объединяются и не сравниваются как одна популяция. Их оценки доступны только через отдельные API: `/api/v1/paysim/predict` и `/api/v1/ieee/predict`.
 
+### Обучение в Kaggle Notebooks без локальных CSV
+
+Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.
+
+Запусти все ячейки. В `/kaggle/working` появятся `izqar_paysim_artifacts.zip` и `izqar_ieee_artifacts.zip`; каждый содержит `.joblib` со схемой, preprocessing и порогом, а также `.metrics.json` с фактическими validation/test метриками. Скачай ZIP из Output и распакуй проверенные артефакты в `backend/models/` на локальном IZQAR. Устанавливай совместимые версии Python и ML-библиотек при загрузке; `joblib` допускается только из доверенного собственного запуска. Перезапусти API после установки моделей. CSV остаются в Kaggle и не копируются в репозиторий.
+
 API `/api/v1/ieee/predict` принимает JSON `{"features": {...}}` со всеми полями обученной схемы. Список `features` записан в `models/ieee_model.metrics.json`; для отсутствующих значений передай явный `null`. Неизвестные и пропущенные ключи возвращают 422.
 
 API **отдельный** от синтетического симулятора, потому что поля/популяции двух наборов данных несовместимы. Если модель не обучена, endpoint возвращает **503**, а не придумывает прогноз.
