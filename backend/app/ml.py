@@ -12,7 +12,8 @@ def _load_artifact(path: Path, expected_kind: str):
         return None
     # A sidecar is readable without executing pickle code. Reject known version
     # mismatches before joblib.load; sklearn does not support cross-version loads.
-    report_path = path.with_suffix('.metrics.json')
+    portable = path.name.endswith('.metrics.json')
+    report_path = path if portable else path.with_suffix('.metrics.json')
     if report_path.is_file():
         try:
             report = json.loads(report_path.read_text(encoding='utf-8'))
@@ -27,10 +28,22 @@ def _load_artifact(path: Path, expected_kind: str):
                 'Use a compatible artifact or retrain with matching versions.'
             )
     try:
-        artifact = joblib.load(path)
+        if portable:
+            if not report_path.is_file() or report.get('format_version') != 3 or report.get('serialization') != 'portable_xgboost_v1':
+                raise ValueError('Unsupported portable manifest')
+            from sklearn.pipeline import Pipeline
+            from xgboost import XGBClassifier
+            stem = path.name.removesuffix('.metrics.json')
+            preprocessing = joblib.load(path.with_name(stem + '.preprocessor.joblib'))
+            model = XGBClassifier()
+            model.load_model(path.with_name(stem + '.xgboost.json'))
+            artifact = dict(report)
+            artifact['pipeline'] = Pipeline([('preprocessing', preprocessing), ('model', model)])
+        else:
+            artifact = joblib.load(path)
     except Exception as exc:
         raise RuntimeError(f'Unable to load {expected_kind} model artifact ({type(exc).__name__})') from exc
-    if (not isinstance(artifact, dict) or artifact.get('format_version') != 2
+    if (not isinstance(artifact, dict) or artifact.get('format_version') != (3 if portable else 2)
             or artifact.get('model_kind') != expected_kind or not artifact.get('features')
             or 'pipeline' not in artifact or 'threshold' not in artifact):
         raise RuntimeError(f'Unsupported {expected_kind} model artifact format')

@@ -31,7 +31,8 @@ PaySim CSV
   └─Хронологическая сортировка `step` / 70:15:15
      └─только pre-transaction `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`
         └─исключение target, post-event balances, account IDs и `isFlaggedFraud`
-           └─models/paysim_model.joblib
+           └─models/paysim_model_v2_portable.metrics.json
+              + .preprocessor.joblib + .xgboost.json
               └─POST /api/v1/paysim/predict
 ```
 
@@ -51,6 +52,7 @@ PaySim CSV
 - `TransactionDT` используется только для **разбиения**, не включён в ML-признаки. Identity merge проверяется `one_to_one` по `TransactionID`.
 - PaySim `isFraud` используется исключительно как y. `isFlaggedFraud`, новые балансы, ID счетов и будущая история физически отсутствуют в feature contract.
 - Обе модели сохраняют baseline и XGBoost метрики раздельно. Скор называется uncalibrated ML score, пока отдельная калибровка не доказана.
+- PaySim v1/v2 архивы `joblib` сохранены, но их XGBoost pickle не является переносимым между Kaggle Linux и Windows. API принимает также формат v3: отчёт-манифест, обученный preprocessing и модель XGBoost JSON. Источник установки должен быть доверенным; загрузка preprocessing через `joblib` выполняет Python-десериализацию.
 - Любой вывод о качестве модели должен ссылаться на `models/ieee_model.metrics.json`, **не** на примеры из симулятора.
 - Отдельный графовый датасет (например, IBM AML, с соблюдением лицензии и воспроизводимым ETL) — следующий этап.
 

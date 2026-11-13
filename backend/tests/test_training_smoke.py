@@ -13,6 +13,8 @@ from train_ieee import train as train_ieee  # noqa: E402
 from train_paysim import train as train_paysim  # noqa: E402
 from audit_ieee_validation import audit as audit_ieee_validation  # noqa: E402
 from audit_paysim_validation import audit as audit_paysim_validation  # noqa: E402
+from export_portable_model import export as export_portable_model  # noqa: E402
+from install_model_bundle import install as install_model_bundle  # noqa: E402
 
 
 def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeypatch):
@@ -39,7 +41,7 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert all('isFraud' not in row['feature'] and 'newbalance' not in row['feature'] for row in pay_report['feature_importance']['top_30'])
     with pytest.raises(FileExistsError, match='Output already exists'):
         train_paysim(paysim_path, pay_model, 8, None)
-    pay_audit = audit_paysim_validation(paysim_path, pay_model, tmp_path / 'paysim_validation_audit.json')
+    pay_audit = audit_paysim_validation(paysim_path, pay_model, pay_model.with_name(pay_model.stem + '.validation_audit.json'))
     assert pay_audit['analysis_source'] == 'frozen_paysim_validation_only'
     assert pay_audit['cases'] == pay_report['split_counts']['validation']
     assert 'test_metrics' not in pay_audit
@@ -100,6 +102,14 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
         pay_response = client.post('/api/v1/paysim/predict', json={'features': pay_features}, headers=auth)
         assert pay_response.status_code == 200, pay_response.text
         assert pay_response.json()['source'] == 'paysim_ml'
+        portable_zip = export_portable_model(pay_model, tmp_path / 'paysim_portable')
+        installed = install_model_bundle(portable_zip, tmp_path / 'installed')
+        assert len(installed) == 4  # model, preprocessing, report, validation audit
+        patch.setattr(ml, 'PAYSIM_MODEL_PATH', tmp_path / 'installed' / 'paysim_portable.metrics.json')
+        ml.load_paysim_model.cache_clear()
+        portable_response = client.post('/api/v1/paysim/predict', json={'features': pay_features}, headers=auth)
+        assert portable_response.status_code == 200, portable_response.text
+        assert portable_response.json()['risk_score'] == pay_response.json()['risk_score']
         ieee_features = {key: None for key in ieee_report['features']}
         ieee_features['TransactionAmt'] = 25
         ieee_response = client.post('/api/v1/ieee/predict', json={'features': ieee_features}, headers=auth)
