@@ -4,6 +4,8 @@ import sys
 import pytest
 
 pd = pytest.importorskip('pandas', reason='ML dependency not installed')
+pytest.importorskip('sklearn', reason='ML dependency not installed')
+pytest.importorskip('xgboost', reason='ML dependency not installed')
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_paysim import FEATURES, read_paysim  # noqa: E402

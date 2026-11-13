@@ -87,16 +87,31 @@ def graph(limit: int = Query(default=500, ge=1, le=1000), window_minutes: int = 
 
 @app.get('/api/v1/model/status', dependencies=[Depends(require_key)])
 def model_status():
-    artifact = load_model()
-    paysim = load_paysim_model()
+    try:
+        artifact = load_model()
+    except RuntimeError as exc:
+        artifact, ieee_error = None, str(exc)
+    else:
+        ieee_error = None
+    try:
+        paysim = load_paysim_model()
+    except RuntimeError as exc:
+        paysim, paysim_error = None, str(exc)
+    else:
+        paysim_error = None
     return {'ready': bool(artifact or paysim), 'mode': 'separate_models',
             'ieee_cis': None if not artifact else {'features': len(artifact['features']), 'test_metrics': artifact.get('test_metrics', {}), 'threshold': artifact['threshold']},
             'paysim': None if not paysim else {'features': len(paysim['features']), 'test_metrics': paysim.get('test_metrics', {}), 'threshold': paysim['threshold']},
-            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim) else None}
+            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim) and not (ieee_error or paysim_error) else None,
+            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error}}
 
 @app.post('/api/v1/ieee/predict', dependencies=[Depends(require_key)])
 def ieee_predict(payload: IeeeFeaturesIn):
-    if load_model() is None:
+    try:
+        artifact = load_model()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f'Incompatible IEEE-CIS model artifact: {exc}') from exc
+    if artifact is None:
         raise HTTPException(status_code=503, detail='Сначала обучите модель IEEE-CIS; см. README')
     try:
         return predict_ieee(payload.features)
@@ -105,7 +120,11 @@ def ieee_predict(payload: IeeeFeaturesIn):
 
 @app.post('/api/v1/paysim/predict', dependencies=[Depends(require_key)])
 def paysim_predict(payload: PaySimFeaturesIn):
-    if load_paysim_model() is None:
+    try:
+        artifact = load_paysim_model()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f'Incompatible PaySim model artifact: {exc}') from exc
+    if artifact is None:
         raise HTTPException(status_code=503, detail='Сначала обучите модель PaySim; см. README')
     try:
         return predict_paysim(payload.features)
