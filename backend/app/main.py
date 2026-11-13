@@ -4,7 +4,8 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from fastapi import FastAPI, Depends, Header, HTTPException, Query
+from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
@@ -30,6 +31,22 @@ app = FastAPI(title='IZQAR Fraud Prevention MVP', version='0.1.0', lifespan=life
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=False,
                    allow_methods=['GET', 'POST', 'PATCH'], allow_headers=['X-API-Key', 'Content-Type'])
 app.mount('/demo', StaticFiles(directory=Path(__file__).parent / 'static', html=True), name='demo')
+
+MAX_API_BODY_BYTES = 64 * 1024
+
+
+@app.middleware('http')
+async def reject_oversized_api_request(request: Request, call_next):
+    """Reject known oversized API bodies before parsers or ML code allocate them."""
+    if request.url.path.startswith('/api/v1/'):
+        raw_length = request.headers.get('content-length')
+        if raw_length is not None:
+            try:
+                if int(raw_length) > MAX_API_BODY_BYTES:
+                    return JSONResponse(status_code=413, content={'detail': 'Request body exceeds 65536 byte limit'})
+            except ValueError:
+                return JSONResponse(status_code=400, content={'detail': 'Invalid Content-Length'})
+    return await call_next(request)
 
 
 def require_key(x_api_key: str | None = Header(default=None)):

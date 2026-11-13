@@ -63,6 +63,17 @@ def test_validation_and_model_unavailable(client, auth):
     assert status.json()['ready'] is False
 
 
+def test_api_rejects_oversized_or_invalid_content_length(client, auth):
+    too_large = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': '65537'}, content=b'{}')
+    assert too_large.status_code == 413
+    invalid = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': 'not-a-length'}, content=b'{}')
+    assert invalid.status_code == 400
+    # Non-API routes and ordinary valid API requests retain their existing behavior.
+    assert client.get('/demo/').status_code == 200
+    assert client.post('/api/v1/transfers', headers=auth,
+                       json={'sender': 'BODY-001', 'recipient': 'BODY-002', 'amount': 1}).status_code == 200
+
+
 def test_autonomous_demo_page(client):
     response = client.get('/demo/')
     assert response.status_code == 200
