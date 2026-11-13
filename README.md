@@ -67,13 +67,13 @@ npm run dev
 
 ## Обучение модели IEEE-CIS Fraud Detection
 
-1. Открой <https://www.kaggle.com/competitions/ieee-fraud-detection/data>, войди в аккаунт, прими правила конкурса и скачай `train_transaction.csv` и (необязательно) `train_identity.csv`.
+1. Открой <https://www.kaggle.com/competitions/ieee-fraud-detection/data>, войди в аккаунт, прими правила конкурса и скачай оба файла: `train_transaction.csv` и `train_identity.csv`.
 2. Сохрани исходные CSV в `backend/data/ieee/` (директория игнорируется Git).
 3. Установи ML-зависимости и запусти обучение из `backend/`:
 
 ```bash
 python -m pip install -r requirements-ml.txt
-python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_model.joblib --estimators 180
+python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_model.joblib --estimators 180 --full-data
 ```
 
 Для короткого технического теста можно добавить `--max-rows 100000 --estimators 30`, **но** в каждом временном сегменте должны быть обе метки, и такие результаты нельзя считать финальной оценкой.
@@ -87,20 +87,14 @@ python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_model.job
 
 ```bash
 python -m pip install -r requirements-ml.txt
-python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_log.csv --output models/paysim_model.joblib --estimators 180
+python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_log.csv --output models/paysim_model.joblib --estimators 180 --full-data
 ```
 
-Для быстрого технического запуска можно добавить `--max-rows 100000 --estimators 30`. Финальными считаются только метрики реального запуска с документированным размером данных. Модель использует исключительно доступные до операции `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; исключены `isFraud`, `isFlaggedFraud`, post-transaction balances, идентификаторы счетов и `step`. `oldbalance*` допустимы в PaySim как моментальный остаток на момент решения, но это предположение синтетического датасета, которое нельзя автоматически переносить на банк.
+Без `--full-data` действует ограничение 500 000 строк PaySim и 200 000 строк IEEE-CIS. Для быстрого технического запуска можно добавить `--max-rows 100000 --estimators 30`. Финальными считаются только метрики реального запуска с документированным размером данных. Модель использует исключительно доступные до операции `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; исключены `isFraud`, `isFlaggedFraud`, post-transaction balances, идентификаторы счетов и `step`. `oldbalance*` предполагаются остатками до операции; эту семантику необходимо проверять при переносе на иной источник данных.
 
 PaySim и IEEE-CIS не объединяются и не сравниваются как одна популяция. Их оценки доступны только через отдельные API: `/api/v1/paysim/predict` и `/api/v1/ieee/predict`.
 
-API для оценки IEEE-CIS записи:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/ieee/predict \
-  -H 'X-API-Key: ВАШ_КЛЮЧ' -H 'Content-Type: application/json' \
-  -d '{"features":{"TransactionAmt":150.0,"ProductCD":"W","card1":9500,"C1":2}}'
-```
+API `/api/v1/ieee/predict` принимает JSON `{"features": {...}}` со всеми полями обученной схемы. Список `features` записан в `models/ieee_model.metrics.json`; для отсутствующих значений передай явный `null`. Неизвестные и пропущенные ключи возвращают 422.
 
 API **отдельный** от синтетического симулятора, потому что поля/популяции двух наборов данных несовместимы. Если модель не обучена, endpoint возвращает **503**, а не придумывает прогноз.
 

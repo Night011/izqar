@@ -69,12 +69,18 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None)
         raise ValueError(f'Missing required columns: {sorted(missing)}')
     tx_usecols = sorted((tx_columns & set(NUMERIC + CATEGORICAL)) | required)
     data = pd.read_csv(tx_path, usecols=tx_usecols, nrows=max_rows, low_memory=False)
+    if data['TransactionID'].isna().any() or not data['TransactionID'].is_unique:
+        raise ValueError('TransactionID must be non-null and unique in train_transaction.csv')
 
+    if not id_path.is_file():
+        raise FileNotFoundError(f'Missing {id_path}; IEEE-CIS training requires both transaction and identity CSV files.')
     if id_path.exists():
         identity_cols = set(pd.read_csv(id_path, nrows=0).columns)
         usecols = sorted(identity_cols & (set(CATEGORICAL) | {'TransactionID'}))
         if len(usecols) > 1:
             identity = pd.read_csv(id_path, usecols=usecols, low_memory=False)
+            if identity['TransactionID'].isna().any() or not identity['TransactionID'].is_unique:
+                raise ValueError('TransactionID must be non-null and unique in train_identity.csv')
             data = data.merge(identity, on='TransactionID', how='left', validate='one_to_one')
     data = data.sort_values(['TransactionDT', 'TransactionID'], kind='stable').reset_index(drop=True)
     nums = [column for column in NUMERIC if column in data]
@@ -88,10 +94,10 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None)
 
     if len(data) < 100:
         raise ValueError('Need at least 100 rows for chronological training and evaluation')
-    first, second = int(len(data) * .70), int(len(data) * .85)
-    train_rows, valid_rows, test_rows = data.iloc[:first], data.iloc[first:second], data.iloc[second:]
+    first, second = data['TransactionDT'].iloc[int(len(data) * .70)], data['TransactionDT'].iloc[int(len(data) * .85)]
+    train_rows, valid_rows, test_rows = data[data.TransactionDT < first], data[(data.TransactionDT >= first) & (data.TransactionDT < second)], data[data.TransactionDT >= second]
     for label, part in [('train', train_rows), ('validation', valid_rows), ('test', test_rows)]:
-        if part['isFraud'].nunique() != 2:
+        if part.empty or part['isFraud'].nunique() != 2:
             raise ValueError(f'{label} split must contain both classes. Select more chronological rows.')
 
     transform = ColumnTransformer([
@@ -154,9 +160,12 @@ def main():
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, default=Path('models/ieee_model.joblib'))
     parser.add_argument('--estimators', type=int, default=180)
-    parser.add_argument('--max-rows', type=int, default=None)
+    parser.add_argument('--max-rows', type=int, default=200_000, help='Default memory cap: 200000 chronological CSV rows')
+    parser.add_argument('--full-data', action='store_true', help='Explicitly opt into loading the entire CSV in RAM')
     args = parser.parse_args()
-    train(args.data_dir, args.output, args.estimators, args.max_rows)
+    if args.max_rows is not None and args.max_rows < 100:
+        parser.error('--max-rows must be at least 100')
+    train(args.data_dir, args.output, args.estimators, None if args.full_data else args.max_rows)
 
 if __name__ == '__main__':
     main()

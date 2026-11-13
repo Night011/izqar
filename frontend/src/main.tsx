@@ -5,6 +5,7 @@ import { Graph } from './Graph';
 import { money, request, shortDate } from './api';
 import type { GraphData, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
 import './styles.css';
+import './model-summary.css';
 
 const scenarios: { type: Scenario; label: string; description: string }[] = [
   { type: 'normal', label: 'Обычная оплата', description: 'Небольшая покупка' },
@@ -135,7 +136,11 @@ function App() {
                   return <div className="dist-row" key={level}><div className="dist-label"><span>{riskLabels[level]}</span><strong>{count}</strong></div><div className="dist-track"><div className={'dist-fill ' + level} style={{ width: `${width}%` }} /></div></div>;
                 })}
               </div>
-              <div className="engine-info"><Cpu size={20} /><div><strong>{model?.ready ? 'IEEE-CIS модель доступна отдельно' : 'Демонстрационные правила активны'}</strong><span>{model?.ready ? 'Тестовые метрики доступны через API модели.' : 'Обучите IEEE-CIS, чтобы включить отдельный ML endpoint.'}</span></div></div>
+              <div className="engine-info"><Cpu size={20} /><div><strong>Демонстрационные правила активны</strong><span>Оценка операций в таблице рассчитана Rule Engine.</span></div></div>
+              <div className="model-summary"><strong>ML-модели · отдельная оценка</strong>{(['paysim', 'ieee_cis'] as const).map(kind => {
+                const entry = model?.[kind];
+                return <div key={kind}><span>{kind === 'paysim' ? 'PaySim' : 'IEEE-CIS'}</span><span>{entry ? `Доступна · F1 test ${Number(entry.test_metrics.f1).toFixed(3)}` : 'Нет обученной модели'}</span></div>;
+              })}<small>Метрики показываются только из обученных артефактов соответствующего датасета.</small></div>
             </section>
           </div>
           <section className="panel transactions-panel">

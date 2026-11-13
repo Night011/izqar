@@ -1,6 +1,7 @@
 """Read configuration from the repository .env; refuse weak demo credentials."""
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -16,5 +17,5 @@ CORS_ORIGINS = [s.strip() for s in os.environ.get('IZQAR_CORS_ORIGINS', 'http://
 
 
 def validate_config() -> None:
-    if len(API_KEY) < 24 or API_KEY in {'CHANGE_ME_TO_RANDOM_32_CHARS', 'replace-me-with-random-secret'}:
+    if len(API_KEY) < 24 or re.match(r'^(CHANGE_ME|replace-me|your[-_]?api[-_]?key|example)', API_KEY, re.IGNORECASE):
         raise RuntimeError('Set IZQAR_API_KEY in .env to a random secret of at least 24 characters (see README).')

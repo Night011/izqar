@@ -29,16 +29,17 @@ def predict_ieee(features: dict):
     if artifact is None:
         return None
     expected = artifact['features']
-    supplied = set(features)
-    # Prevent a confident answer on a row with no meaningful model inputs.
-    recognized = supplied.intersection(expected)
-    if len(recognized) < 3 or 'TransactionAmt' not in recognized:
-        raise ValueError('Provide TransactionAmt and at least two supported IEEE-CIS features')
-    record = {key: features.get(key) for key in expected}
+    missing = sorted(set(expected) - set(features))
+    unknown = sorted(set(features) - set(expected))
+    if missing or unknown:
+        raise ValueError(f'IEEE-CIS schema mismatch; missing: {missing}; unsupported: {unknown}')
+    record = {key: features[key] for key in expected}
     import pandas as pd
     frame = pd.DataFrame([record], columns=expected)
     for col in artifact['numerical_features']:
         frame[col] = pd.to_numeric(frame[col], errors='coerce')
+        if features[col] is not None and pd.isna(frame[col].iloc[0]):
+            raise ValueError(f'{col} must be numeric or null')
     for col in artifact['categorical_features']:
         frame[col] = frame[col].astype('string').fillna('__missing__').astype(str)
     score = float(artifact['pipeline'].predict_proba(frame)[0, 1])

@@ -35,6 +35,10 @@ def test_graph_fan_in_and_velocity(client, auth):
     assert 'rapid_transfer_chains' in graph['indicators']
     r2 = client.post('/api/v1/demo/simulate', json={'scenario': 'velocity'}, headers=auth)
     assert r2.json()[-1]['risk_score'] > r2.json()[0]['risk_score']
+    chain = client.post('/api/v1/demo/simulate', json={'scenario': 'chain'}, headers=auth)
+    assert chain.status_code == 200
+    graph = client.get('/api/v1/graph', headers=auth).json()
+    assert any(c['path'] == ['SOURCE-110', 'LINK-111', 'LINK-112'] for c in graph['indicators']['rapid_transfer_chains'])
 
 
 def test_validation_and_model_unavailable(client, auth):
@@ -44,8 +48,10 @@ def test_validation_and_model_unavailable(client, auth):
     assert bad.status_code == 422
     missing = client.post('/api/v1/ieee/predict', json={'features': {'TransactionAmt': 5}}, headers=auth)
     assert missing.status_code == 503
-    paysim = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0, 'isFraud': 1}}, headers=auth)
+    paysim = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0}}, headers=auth)
     assert paysim.status_code == 503  # no artifact must never generate a score
+    leaked = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0, 'isFraud': 1}}, headers=auth)
+    assert leaked.status_code == 422
     status = client.get('/api/v1/model/status', headers=auth)
     assert status.status_code == 200
     assert status.json()['ready'] is False

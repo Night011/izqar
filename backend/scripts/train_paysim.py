@@ -61,7 +61,7 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
     # nrows prevents accidental full-memory loads during developer experiments.
     data = pd.read_csv(path, usecols=usecols, nrows=max_rows, low_memory=False,
                        dtype={'step': 'int32', 'amount': 'float32', 'oldbalanceOrg': 'float32', 'oldbalanceDest': 'float32', 'isFraud': 'int8', 'type': 'category'})
-    if data['isFraud'].isin([0, 1]).all() is False:
+    if not data['isFraud'].isin([0, 1]).all():
         raise ValueError('isFraud must be binary')
     return data.sort_values('step', kind='stable').reset_index(drop=True)
 
@@ -72,10 +72,10 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     data = read_paysim(data_path, max_rows)
     if len(data) < 100:
         raise ValueError('Need at least 100 rows for chronological training and evaluation')
-    first, second = int(len(data) * .70), int(len(data) * .85)
-    train_rows, valid_rows, test_rows = data.iloc[:first], data.iloc[first:second], data.iloc[second:]
+    first, second = data['step'].iloc[int(len(data) * .70)], data['step'].iloc[int(len(data) * .85)]
+    train_rows, valid_rows, test_rows = data[data.step < first], data[(data.step >= first) & (data.step < second)], data[data.step >= second]
     for label, part in [('train', train_rows), ('validation', valid_rows), ('test', test_rows)]:
-        if part['isFraud'].nunique() != 2:
+        if part.empty or part['isFraud'].nunique() != 2:
             raise ValueError(f'{label} split must contain both classes. Increase --max-rows or use the full chronology.')
     transform = ColumnTransformer([
         ('numeric', SimpleImputer(strategy='median', add_indicator=True), NUMERIC),
@@ -119,9 +119,12 @@ def main():
     parser.add_argument('--data', type=Path, required=True, help='Path to original PS_20174392719_1491204439457_log.csv')
     parser.add_argument('--output', type=Path, default=Path('models/paysim_model.joblib'))
     parser.add_argument('--estimators', type=int, default=180)
-    parser.add_argument('--max-rows', type=int, default=None, help='Safe experiment cap; omit only for full training')
+    parser.add_argument('--max-rows', type=int, default=500_000, help='Default memory cap: 500000 chronological CSV rows')
+    parser.add_argument('--full-data', action='store_true', help='Explicitly opt into loading the entire CSV in RAM')
     args = parser.parse_args()
-    train(args.data, args.output, args.estimators, args.max_rows)
+    if args.max_rows is not None and args.max_rows < 100:
+        parser.error('--max-rows must be at least 100')
+    train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows)
 
 
 if __name__ == '__main__':

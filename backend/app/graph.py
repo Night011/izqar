@@ -27,12 +27,14 @@ def build_graph(db: Session, limit: int = 500, window_minutes: int = 1440) -> di
               'total_amount': round(data['total_amount'], 2), 'latest_at': data['latest_at'].isoformat()} for source, target, data in graph.edges(data=True)]
     chronological = sorted(rows, key=lambda tx: (tx.created_at, tx.id))
     rapid_chains = []
-    for first, second in zip(chronological, chronological[1:]):
-        delta = (second.created_at - first.created_at).total_seconds()
-        if first.recipient == second.sender and 0 <= delta <= 900:
-            rapid_chains.append({'path': [first.sender, first.recipient, second.recipient], 'minutes_between': round(delta / 60, 2), 'amounts': [round(first.amount, 2), round(second.amount, 2)]})
-            if len(rapid_chains) >= 20:
-                break
+    recent_inbound = {}
+    for tx in chronological:
+        first = recent_inbound.get(tx.sender)
+        if first is not None:
+            delta = (tx.created_at - first.created_at).total_seconds()
+            if 0 <= delta <= 900 and len(rapid_chains) < 20:
+                rapid_chains.append({'path': [first.sender, first.recipient, tx.recipient], 'minutes_between': round(delta / 60, 2), 'amounts': [round(first.amount, 2), round(tx.amount, 2)]})
+        recent_inbound[tx.recipient] = tx
     indicators = {
         'high_fan_in_accounts': [n['id'] for n in nodes if n['in_degree'] >= 3],
         'high_fan_out_accounts': [n['id'] for n in nodes if n['out_degree'] >= 3],
