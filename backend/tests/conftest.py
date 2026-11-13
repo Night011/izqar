@@ -12,6 +12,13 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 
+@pytest.fixture(scope='session', autouse=True)
+def close_test_database():
+    """Release SQLite's Windows file handle before TemporaryDirectory cleanup."""
+    yield
+    engine.dispose()
+    _tmpdir.cleanup()
+
 @pytest.fixture()
 def client():
     Base.metadata.drop_all(engine)

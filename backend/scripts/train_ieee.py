@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
@@ -34,13 +35,17 @@ CATEGORICAL = [
 
 def metrics(y_true, scores, threshold):
     pred = (scores >= threshold).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
     return {
         'average_precision_pr_auc': round(float(average_precision_score(y_true, scores)), 6),
         'roc_auc': round(float(roc_auc_score(y_true, scores)), 6),
         'precision': round(float(precision_score(y_true, pred, zero_division=0)), 6),
         'recall': round(float(recall_score(y_true, pred, zero_division=0)), 6),
         'f1': round(float(f1_score(y_true, pred, zero_division=0)), 6),
-        'confusion_matrix_tn_fp_fn_tp': confusion_matrix(y_true, pred, labels=[0, 1]).ravel().tolist(),
+        'confusion_matrix_tn_fp_fn_tp': [int(tn), int(fp), int(fn), int(tp)],
+        'false_positive_rate': round(float(fp / max(fp + tn, 1)), 6),
+        'false_negative_rate': round(float(fn / max(fn + tp, 1)), 6),
+        'false_alerts_per_10000_operations': round(float(fp * 10000 / max(len(y_true), 1)), 3),
         'cases': int(len(y_true)),
         'fraud_cases': int(y_true.sum()),
     }
@@ -104,15 +109,22 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None)
     )
     pipeline = Pipeline([('preprocessing', transform), ('model', classifier)])
     x_train, y_train = train_rows[features], train_rows['isFraud'].astype(int)
+    # A simple baseline makes the XGBoost result interpretable; it is not used for threshold selection.
+    baseline = Pipeline([('preprocessing', transform), ('model', LogisticRegression(max_iter=250, class_weight='balanced', solver='saga', n_jobs=min(4, os.cpu_count() or 1)))])
+    baseline.fit(x_train, y_train)
     pipeline.fit(x_train, y_train)
     validation_scores = pipeline.predict_proba(valid_rows[features])[:, 1]
     threshold = choose_threshold(valid_rows['isFraud'].astype(int), validation_scores)
     test_scores = pipeline.predict_proba(test_rows[features])[:, 1]
     validation_metrics = metrics(valid_rows['isFraud'].astype(int), validation_scores, threshold)
     test_metrics = metrics(test_rows['isFraud'].astype(int), test_scores, threshold)
+    baseline_scores = baseline.predict_proba(test_rows[features])[:, 1]
+    baseline_test_metrics = metrics(test_rows['isFraud'].astype(int), baseline_scores, .5)
 
     artifact = {
-        'format_version': 1,
+        'format_version': 2,
+        'model_kind': 'ieee_cis',
+        'model_version': 'ieee-cis-xgboost-v1',
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'IEEE-CIS Fraud Detection (Kaggle competition)',
         'pipeline': pipeline,
@@ -122,6 +134,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None)
         'threshold': threshold,
         'validation_metrics': validation_metrics,
         'test_metrics': test_metrics,
+        'baseline_test_metrics': baseline_test_metrics,
         'split_method': '70/15/15 chronological TransactionDT ascending',
         'warning': 'Research dataset; scores not calibrated for deployment and not a guarantee of banking fraud detection.',
     }
@@ -132,7 +145,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None)
     report_path = output.with_suffix('.metrics.json')
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'model_path': str(output), 'metrics_path': str(report_path),
-                      'validation': validation_metrics, 'test': test_metrics}, ensure_ascii=False, indent=2))
+                      'validation': validation_metrics, 'test': test_metrics, 'baseline_test': baseline_test_metrics}, ensure_ascii=False, indent=2))
     print('IMPORTANT: The held-out test set was evaluated once after threshold selection on validation.')
 
 

@@ -17,7 +17,7 @@ const riskLabels = { low: 'Низкий риск', medium: 'Средний ри�
 const decisionLabels: Record<string, string> = { allow: 'Разрешено', step_up: 'Доп. проверка', review: 'На рассмотрении' };
 const reviewLabels: Record<Review, string> = { pending: 'Не проверено', confirmed_fraud: 'Подтверждено аналитиком', false_positive: 'Ложная тревога' };
 const blank: Metrics = { transactions: 0, simulated_volume_kzt: 0, high: 0, medium: 0, low: 0, reviewed: 0, disclaimer: '' };
-const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], note: '' } };
+const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], rapid_transfer_chains: [], window_minutes: 1440, note: '' } };
 
 function App() {
   const [key, setKey] = useState(() => sessionStorage.getItem('izqar-api-key') ?? '');
@@ -100,7 +100,8 @@ function App() {
       <div className="side-label">СТАТУС СИСТЕМЫ</div>
       <div className="system-row"><span className="status-dot" /> API-сервис <span>Активен</span></div>
       <div className="system-row"><span className="status-dot" /> Rule Engine <span>Активен</span></div>
-      <div className="system-row"><span className={'status-dot ' + (model?.ready ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ready ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.ieee_cis ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ieee_cis ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.paysim ? '' : 'amber')} /> PaySim ML <span>{model?.paysim ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="side-bottom"><div className="mini-shield"><ShieldCheck size={17} /></div><div><strong>Hackathon MVP</strong><span>Локальная симуляция</span></div></div>
     </aside>
 

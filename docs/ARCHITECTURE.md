@@ -16,7 +16,7 @@ HTML / React UI
 
 Каждое действие сохраняет уже **синтетическую** операцию. Анализ признаков берёт только предыдущие строки БД. Высокая связность на графе — признак для изучения, а не обвинение.
 
-### IEEE-CIS ML-поток
+### ML-потоки (строго раздельные)
 
 ```
 train_transaction.csv (+ train_identity.csv)
@@ -26,6 +26,13 @@ train_transaction.csv (+ train_identity.csv)
            └─Оценка на test → JSON метрики
               └─models/ieee_model.joblib
                  └─POST /api/v1/ieee/predict
+
+PaySim CSV
+  └─Хронологическая сортировка `step` / 70:15:15
+     └─только pre-transaction `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`
+        └─исключение target, post-event balances, account IDs и `isFlaggedFraud`
+           └─models/paysim_model.joblib
+              └─POST /api/v1/paysim/predict
 ```
 
 Значения скоров симулятора **не** подаются в IEEE-модель и наоборот.
@@ -41,7 +48,9 @@ train_transaction.csv (+ train_identity.csv)
 ## 3. Корректность ML
 
 - IEEE-CIS содержит онлайн-платёжные признаки и не содержит переводов `account A → account B`, достаточных для достоверного графового расследования.
-- `TransactionDT` используется только для **разбиения**, не включён в ML-признаки.
+- `TransactionDT` используется только для **разбиения**, не включён в ML-признаки. Identity merge проверяется `one_to_one` по `TransactionID`.
+- PaySim `isFraud` используется исключительно как y. `isFlaggedFraud`, новые балансы, ID счетов и будущая история физически отсутствуют в feature contract.
+- Обе модели сохраняют baseline и XGBoost метрики раздельно. Скор называется uncalibrated ML score, пока отдельная калибровка не доказана.
 - Любой вывод о качестве модели должен ссылаться на `models/ieee_model.metrics.json`, **не** на примеры из симулятора.
 - Отдельный графовый датасет (например, IBM AML, с соблюдением лицензии и воспроизводимым ETL) — следующий этап.
 

@@ -31,6 +31,8 @@ def test_graph_fan_in_and_velocity(client, auth):
     graph = client.get('/api/v1/graph', headers=auth).json()
     assert 'MULE-001' in graph['indicators']['high_fan_in_accounts']
     assert len(graph['edges']) == 6
+    assert graph['indicators']['window_minutes'] == 1440
+    assert 'rapid_transfer_chains' in graph['indicators']
     r2 = client.post('/api/v1/demo/simulate', json={'scenario': 'velocity'}, headers=auth)
     assert r2.json()[-1]['risk_score'] > r2.json()[0]['risk_score']
 
@@ -42,6 +44,11 @@ def test_validation_and_model_unavailable(client, auth):
     assert bad.status_code == 422
     missing = client.post('/api/v1/ieee/predict', json={'features': {'TransactionAmt': 5}}, headers=auth)
     assert missing.status_code == 503
+    paysim = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0, 'isFraud': 1}}, headers=auth)
+    assert paysim.status_code == 503  # no artifact must never generate a score
+    status = client.get('/api/v1/model/status', headers=auth)
+    assert status.status_code == 200
+    assert status.json()['ready'] is False
 
 
 def test_autonomous_demo_page(client):

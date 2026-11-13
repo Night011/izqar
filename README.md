@@ -13,7 +13,7 @@
 - **Графовый анализ NetworkX** (уникальные счета/рёбра, признаки высокого fan-in/fan-out); граф сам по себе не доказывает мошенничество.
 - **Журнал операций**, статусы «подтверждено аналитиком» / «ложная тревога».
 - **Два интерфейса**: автономный веб-интерфейс без Node.js и расширенная React/TypeScript панель с Cytoscape.
-- **IEEE-CIS train script**: XGBoost, хронологическое разделение train/validation/test, подбор порога только на validation, тестовые precision/recall/F1/PR-AUC.
+- **Два независимых ML-пайплайна**: PaySim и IEEE-CIS с отдельными схемами, артефактами и endpoint'ами; XGBoost, baseline, хронологическое разделение и порог только по validation.
 - **Pytest** для API, симуляций, авторизации и графа; GitHub Actions для тестов и сборки фронтенда.
 
 ## Самый быстрый запуск в Windows, без Node.js
@@ -78,7 +78,21 @@ python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_model.job
 
 Для короткого технического теста можно добавить `--max-rows 100000 --estimators 30`, **но** в каждом временном сегменте должны быть обе метки, и такие результаты нельзя считать финальной оценкой.
 
-Выход: `models/ieee_model.joblib` и `models/ieee_model.metrics.json` с настоящими метриками отложенной части **IEEE-CIS**. Артефакт модели содержит сериализованный объект Python (`joblib`); загружай только собственные/доверенные файлы. Рестарт API необходим после обучения, если он уже запущен.
+Выход: `models/ieee_model.joblib` и `models/ieee_model.metrics.json` с настоящими метриками отложенной части **IEEE-CIS**. Отчёт включает baseline и XGBoost, Precision, Recall, F1, PR-AUC, ROC-AUC, матрицу ошибок, FPR/FNR и ложные тревоги на 10 000 операций. Артефакт модели содержит сериализованный объект Python (`joblib`); загружай только собственные/доверенные файлы. Рестарт API необходим после обучения, если он уже запущен.
+
+## Обучение модели PaySim
+
+1. Скачай исходный CSV PaySim после принятия условий на [Kaggle](https://www.kaggle.com/datasets/ealaxi/paysim1) и помести его в `backend/data/paysim/`. Исходник не меняется и не коммитится.
+2. Запусти из `backend/`:
+
+```bash
+python -m pip install -r requirements-ml.txt
+python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_log.csv --output models/paysim_model.joblib --estimators 180
+```
+
+Для быстрого технического запуска можно добавить `--max-rows 100000 --estimators 30`. Финальными считаются только метрики реального запуска с документированным размером данных. Модель использует исключительно доступные до операции `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; исключены `isFraud`, `isFlaggedFraud`, post-transaction balances, идентификаторы счетов и `step`. `oldbalance*` допустимы в PaySim как моментальный остаток на момент решения, но это предположение синтетического датасета, которое нельзя автоматически переносить на банк.
+
+PaySim и IEEE-CIS не объединяются и не сравниваются как одна популяция. Их оценки доступны только через отдельные API: `/api/v1/paysim/predict` и `/api/v1/ieee/predict`.
 
 API для оценки IEEE-CIS записи:
 
@@ -128,6 +142,7 @@ docker compose up --build
 | POST | `/api/v1/demo/simulate` | Запуск одного из пяти сценариев |
 | GET | `/api/v1/model/status` | Состояние модели IEEE-CIS |
 | POST | `/api/v1/ieee/predict` | ML-скор записи IEEE-CIS (после обучения) |
+| POST | `/api/v1/paysim/predict` | ML-скор совместимой записи PaySim (после обучения) |
 
 ### Тестирование
 

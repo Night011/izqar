@@ -25,12 +25,13 @@ export interface Metrics {
 }
 export interface GraphData {
   nodes: { id: string; in_degree: number; out_degree: number; flagged: boolean }[];
-  edges: { source: string; target: string; count: number; total_amount: number }[];
-  indicators: { high_fan_in_accounts: string[]; high_fan_out_accounts: string[]; note: string };
+  edges: { source: string; target: string; count: number; total_amount: number; latest_at: string }[];
+  indicators: { high_fan_in_accounts: string[]; high_fan_out_accounts: string[]; rapid_transfer_chains: unknown[]; window_minutes: number; note: string };
 }
 export interface ModelStatus {
   ready: boolean; mode: string; message?: string;
-  features?: number; test_metrics?: Record<string, number | number[]>; threshold?: number;
+  ieee_cis?: { features: number; test_metrics: Record<string, number | number[]>; threshold: number } | null;
+  paysim?: { features: number; test_metrics: Record<string, number | number[]>; threshold: number } | null;
 }
 
 const ROOT = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';

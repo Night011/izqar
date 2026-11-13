@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session
 from .config import API_KEY, CORS_ORIGINS, validate_config
 from .database import Base, engine, get_db
 from .models import Transaction
-from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn
+from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn
 from .risk import assess
 from .graph import build_graph
-from .ml import load_model, predict_ieee
+from .ml import load_model, load_paysim_model, predict_ieee, predict_paysim
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -82,16 +82,17 @@ def metrics(db: Session = Depends(get_db)):
             'disclaimer': 'Синтетические операции; показатели не являются метриками реального банка.'}
 
 @app.get('/api/v1/graph', dependencies=[Depends(require_key)])
-def graph(limit: int = Query(default=500, ge=1, le=1000), db: Session = Depends(get_db)):
-    return build_graph(db, limit)
+def graph(limit: int = Query(default=500, ge=1, le=1000), window_minutes: int = Query(default=1440, ge=1, le=43_200), db: Session = Depends(get_db)):
+    return build_graph(db, limit, window_minutes)
 
 @app.get('/api/v1/model/status', dependencies=[Depends(require_key)])
 def model_status():
     artifact = load_model()
-    if not artifact:
-        return {'ready': False, 'mode': 'rules_only', 'message': 'IEEE-CIS model not trained; demo rules are available.'}
-    return {'ready': True, 'mode': 'ieee_cis', 'features': len(artifact['features']),
-            'test_metrics': artifact.get('test_metrics', {}), 'threshold': artifact['threshold']}
+    paysim = load_paysim_model()
+    return {'ready': bool(artifact or paysim), 'mode': 'separate_models',
+            'ieee_cis': None if not artifact else {'features': len(artifact['features']), 'test_metrics': artifact.get('test_metrics', {}), 'threshold': artifact['threshold']},
+            'paysim': None if not paysim else {'features': len(paysim['features']), 'test_metrics': paysim.get('test_metrics', {}), 'threshold': paysim['threshold']},
+            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim) else None}
 
 @app.post('/api/v1/ieee/predict', dependencies=[Depends(require_key)])
 def ieee_predict(payload: IeeeFeaturesIn):
@@ -99,6 +100,15 @@ def ieee_predict(payload: IeeeFeaturesIn):
         raise HTTPException(status_code=503, detail='Сначала обучите модель IEEE-CIS; см. README')
     try:
         return predict_ieee(payload.features)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@app.post('/api/v1/paysim/predict', dependencies=[Depends(require_key)])
+def paysim_predict(payload: PaySimFeaturesIn):
+    if load_paysim_model() is None:
+        raise HTTPException(status_code=503, detail='Сначала обучите модель PaySim; см. README')
+    try:
+        return predict_paysim(payload.features)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
