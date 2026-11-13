@@ -73,12 +73,12 @@ npm run dev
 
 ```bash
 python -m pip install -r requirements-ml.txt
-python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_model.joblib --estimators 180 --full-data
+python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_final_v2.joblib --estimators 180 --mode final
 ```
 
-Для короткого технического теста можно добавить `--max-rows 100000 --estimators 30`, **но** в каждом временном сегменте должны быть обе метки, и такие результаты нельзя считать финальной оценкой.
+Для экспериментов 100k/200k/300k сначала прочитай [протокол оценки](docs/IEEE_EVALUATION.md). `--max-train-rows` меняет только обучающий сегмент; validation и финальный test остаются фиксированными. Режим `experiment` не рассчитывает метрики финального test и сохраняет только validation-отчёт.
 
-Выход: `models/ieee_model.joblib` и `models/ieee_model.metrics.json` с настоящими метриками отложенной части **IEEE-CIS**. Отчёт включает baseline и XGBoost, Precision, Recall, F1, PR-AUC, ROC-AUC, матрицу ошибок, FPR/FNR и ложные тревоги на 10 000 операций. Артефакт модели содержит сериализованный объект Python (`joblib`); загружай только собственные/доверенные файлы. Рестарт API необходим после обучения, если он уже запущен.
+Выход: `models/ieee_final_v2.joblib` и `models/ieee_final_v2.metrics.json` с настоящими метриками отложенной части **IEEE-CIS**. Отчёт включает baseline и XGBoost, Precision, Recall, F1, PR-AUC, ROC-AUC, матрицу ошибок, FPR/FNR и ложные тревоги на 10 000 операций. Артефакт модели содержит сериализованный объект Python (`joblib`); загружай только собственные/доверенные файлы. Для использования нового файла в API установи `IZQAR_MODEL_PATH` на его путь и перезапусти API. Скрипт не перезаписывает прежние результаты.
 
 ## Обучение модели PaySim
 
@@ -90,7 +90,7 @@ python -m pip install -r requirements-ml.txt
 python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_log.csv --output models/paysim_model.joblib --estimators 180 --full-data
 ```
 
-Без `--full-data` действует ограничение 500 000 строк PaySim и 200 000 строк IEEE-CIS. Для быстрого технического запуска можно добавить `--max-rows 100000 --estimators 30`. Финальными считаются только метрики реального запуска с документированным размером данных. Модель использует исключительно доступные до операции `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; исключены `isFraud`, `isFlaggedFraud`, post-transaction balances, идентификаторы счетов и `step`. `oldbalance*` предполагаются остатками до операции; эту семантику необходимо проверять при переносе на иной источник данных.
+Для PaySim без `--full-data` действует ограничение 500 000 строк; IEEE-CIS теперь всегда читает весь размеченный CSV, чтобы закрепить финальный test, и ограничивает только train с `--max-train-rows`. Финальными считаются только метрики реального запуска с документированным размером данных. Модель PaySim использует исключительно доступные до операции `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; исключены `isFraud`, `isFlaggedFraud`, post-transaction balances, идентификаторы счетов и `step`. `oldbalance*` предполагаются остатками до операции; эту семантику необходимо проверять при переносе на иной источник данных.
 
 PaySim и IEEE-CIS не объединяются и не сравниваются как одна популяция. Их оценки доступны только через отдельные API: `/api/v1/paysim/predict` и `/api/v1/ieee/predict`.
 
@@ -98,7 +98,7 @@ PaySim и IEEE-CIS не объединяются и не сравниваютс�
 
 Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.
 
-Запусти все ячейки. В `/kaggle/working` появятся `izqar_paysim_artifacts.zip` и `izqar_ieee_artifacts.zip`; каждый содержит `.joblib` со схемой, preprocessing и порогом, а также `.metrics.json` с фактическими validation/test метриками. Скачай ZIP из Output и распакуй проверенные артефакты в `backend/models/` на локальном IZQAR. Устанавливай совместимые версии Python и ML-библиотек при загрузке; `joblib` допускается только из доверенного собственного запуска. Перезапусти API после установки моделей. CSV остаются в Kaggle и не копируются в репозиторий.
+В PaySim запусти все ячейки. В IEEE сначала запусти ячейки экспериментов и изучи validation-отчёты; финальная ячейка по умолчанию отключена (`RUN_FINAL = False`). После фиксации параметров и стратегии порога выставь `RUN_FINAL = True` и запусти её один раз. В `/kaggle/working` появятся `izqar_paysim_artifacts.zip` и `izqar_ieee_artifacts.zip`; каждый содержит `.joblib` со схемой, preprocessing и порогом, а также `.metrics.json` с фактическими validation/test метриками после финального запуска. Скачай ZIP из Output и распакуй проверенные артефакты в `backend/models/` на локальном IZQAR. Устанавливай совместимые версии Python и ML-библиотек при загрузке; `joblib` допускается только из доверенного собственного запуска. Перезапусти API после установки моделей. CSV остаются в Kaggle и не копируются в репозиторий.
 
 API `/api/v1/ieee/predict` принимает JSON `{"features": {...}}` со всеми полями обученной схемы. Список `features` записан в `models/ieee_model.metrics.json`; для отсутствующих значений передай явный `null`. Неизвестные и пропущенные ключи возвращают 422.
 

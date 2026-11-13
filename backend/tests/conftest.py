@@ -7,6 +7,8 @@ import pytest
 _tmpdir = tempfile.TemporaryDirectory()
 os.environ['IZQAR_API_KEY'] = 'test-only-secret-key-longer-than-32-characters'
 os.environ['DATABASE_URL'] = f"sqlite:///{Path(_tmpdir.name) / 'tests.db'}"
+os.environ['IZQAR_MODEL_PATH'] = str(Path(_tmpdir.name) / 'missing_ieee_model.joblib')
+os.environ['IZQAR_PAYSIM_MODEL_PATH'] = str(Path(_tmpdir.name) / 'missing_paysim_model.joblib')
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402

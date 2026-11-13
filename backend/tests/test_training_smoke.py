@@ -49,6 +49,17 @@ def test_both_trainers_create_separate_artifacts(tmp_path):
     assert ieee_report['test_metrics']['cases'] == 45
     assert 'TransactionID' not in ieee_report['features']
     assert 'isFraud' not in ieee_report['features']
+    assert ieee_report['baseline_convergence']['converged'] is True
+    assert ieee_report['feature_importance']['leakage_audit']
+    experiment_model = tmp_path / 'experiments' / 'ieee_100.joblib'
+    train_ieee(ieee_dir, experiment_model, n_estimators=8, max_rows=100, mode='experiment')
+    experiment_report = json.loads(experiment_model.with_suffix('.metrics.json').read_text(encoding='utf-8'))
+    assert not experiment_model.exists()
+    assert experiment_report['test_metrics'] is None
+    assert experiment_report['baseline_test_metrics'] is None
+    assert experiment_report['split_boundaries'] == ieee_report['split_boundaries']
+    assert experiment_report['split_counts']['final_test'] == ieee_report['split_counts']['final_test']
+    assert experiment_report['split_counts']['train_used'] == 100
 
 
 def test_ieee_rejects_duplicate_transaction_id(tmp_path):
