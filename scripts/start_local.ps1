@@ -1,23 +1,35 @@
 # Run from PowerShell: powershell -ExecutionPolicy Bypass -File .\scripts\start_local.ps1
+param([switch]$ConfigureOnly)
 $ErrorActionPreference = 'Stop'
 $project = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $project
 $envPath = Join-Path $project '.env'
-$invalidKey = $true
+$generateKey = -not (Test-Path $envPath)
+$keyPattern = '(?m)^\s*IZQAR_API_KEY\s*=\s*(.*?)\s*$'
 if (Test-Path $envPath) {
-  $match = Select-String -Path $envPath -Pattern '^\s*IZQAR_API_KEY\s*=\s*(.*?)\s*$' | Select-Object -First 1
-  if ($match) {
-    $currentKey = $match.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
-    $invalidKey = $currentKey.Length -lt 24 -or $currentKey -match '^(CHANGE_ME|replace-me|your[-_]?api[-_]?key|example)'
+  $content = Get-Content -LiteralPath $envPath -Raw
+  $keyEntries = [regex]::Matches($content, $keyPattern)
+  if ($keyEntries.Count -gt 1) { throw '.env contains multiple IZQAR_API_KEY entries; resolve them manually.' }
+  if ($keyEntries.Count -eq 0) {
+    $generateKey = $true
+  } else {
+    $currentKey = $keyEntries[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+    $template = $currentKey -eq '' -or $currentKey -match '^(CHANGE_ME|replace-me|your[-_]?api[-_]?key|example)'
+    if ($template) {
+      $generateKey = $true
+    } elseif ($currentKey.Length -lt 24) {
+      throw 'Existing IZQAR_API_KEY is shorter than 24 characters. It was not overwritten; replace it manually with a secure key.'
+    }
   }
 }
-if ($invalidKey) {
-  $secret = (& py -3 -c 'import secrets; print(secrets.token_urlsafe(32))').Trim()
-  if ($LASTEXITCODE -ne 0 -or $secret.Length -lt 24) { throw 'Python 3 is required; unable to generate a secure API key.' }
+if ($generateKey) {
+  $bytes = [byte[]]::new(32)
+  $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $random.GetBytes($bytes) } finally { $random.Dispose() }
+  $secret = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
   if (Test-Path $envPath) {
-    $content = Get-Content -Raw $envPath
-    if ($content -match '(?m)^\s*IZQAR_API_KEY\s*=.*$') {
-      $content = [regex]::Replace($content, '(?m)^\s*IZQAR_API_KEY\s*=.*$', "IZQAR_API_KEY=$secret")
+    if ($keyEntries.Count -eq 1) {
+      $content = [regex]::Replace($content, $keyPattern, "IZQAR_API_KEY=$secret")
     } else {
       $content = "IZQAR_API_KEY=$secret`n$content"
     }
@@ -29,6 +41,7 @@ if ($invalidKey) {
     Write-Host 'Created .env with a new local API key.' -ForegroundColor Green
   }
 }
+if ($ConfigureOnly) { Write-Host 'Local demo API key configuration is valid.'; return }
 $backend = Join-Path $project 'backend'
 Set-Location $backend
 if (-not (Test-Path '.venv')) { & py -3 -m venv .venv }
