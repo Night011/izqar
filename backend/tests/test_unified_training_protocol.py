@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_unified import balanced_cap, choose_threshold, ieee, metrics, transformer  # noqa: E402
+from train_unified import baf, balanced_cap, choose_threshold, ieee, metrics, transformer  # noqa: E402
 
 
 def test_training_adapter_is_train_fitted_and_handles_unknown_categories():
@@ -57,3 +57,23 @@ def test_ieee_adapter_requires_identity_and_enforces_one_to_one_merge(tmp_path):
         assert 'unique' in str(exc)
     else:
         raise AssertionError('duplicate identity IDs must fail')
+
+
+def test_baf_adapter_unpacks_partition_and_boundary_contract(monkeypatch, tmp_path):
+    rows = pd.DataFrame({
+        'fraud_bool': [0, 1, 0, 1, 0, 1],
+        'month': [0, 0, 1, 1, 2, 2],
+        **{name: [1.] * 6 for name in ('income', 'name_email_similarity', 'prev_address_months_count',
+                                        'current_address_months_count', 'customer_age', 'intended_balcon_amount',
+                                        'proposed_credit_limit', 'session_length_in_minutes', 'bank_months_count',
+                                        'email_is_free', 'phone_home_valid', 'phone_mobile_valid', 'has_other_cards',
+                                        'foreign_request', 'keep_alive_session')},
+        **{name: ['value'] * 6 for name in ('payment_type', 'employment_status', 'housing_status', 'source', 'device_os')},
+    })
+    monkeypatch.setattr('train_unified.read_base', lambda _: rows)
+    train, valid, sealed = rows.iloc[:2], rows.iloc[2:4], rows.iloc[4:]
+    monkeypatch.setattr('train_unified.split_months', lambda _: ((train, valid, sealed), {'test_month': 2}))
+    result = baf(tmp_path / 'Base.csv', 10)
+    assert len(result[0]) == len(train)
+    assert len(result[2]) == len(valid)
+    assert result[6]['method'].endswith('final month sealed')

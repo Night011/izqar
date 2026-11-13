@@ -102,7 +102,10 @@ def ieee(data_dir, cap):
 
 def baf(path, cap):
     data = read_base(path)
-    train, valid, _ = split_months(data)
+    # ``split_months`` returns both the three chronological partitions and
+    # their audit boundaries.  Keep the last month sealed: this validation
+    # experiment must not materialise it at all.
+    (train, valid, _sealed_test), _boundaries = split_months(data)
     return (train[BAF_FEATURES], train.fraud_bool.to_numpy(), valid[BAF_FEATURES], valid.fraud_bool.to_numpy(), BAF_CATS, BAF_NUMS,
             {'method':'earlier months train, penultimate validation, final month sealed', 'excluded':['fraud_bool','month','device_fraud_count','days_since_request','credit_risk_score']})
 
