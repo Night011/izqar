@@ -6,7 +6,7 @@
 2. Через **Add Input** подключите: `ealaxi/paysim1`, `ieee-fraud-detection`, `sgpjesus/bank-account-fraud-dataset-neurips-2022`, `ealtman2019/ibm-transactions-for-anti-money-laundering-aml`. Условия IEEE-CIS принимает только владелец аккаунта.
 3. Включите Internet только для клонирования feature-ветки и зависимостей. Исходные CSV не скачивать в локальный репозиторий.
 4. Выполните notebook. Он использует validation-only периоды и создаёт `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` в `/kaggle/working/izqar_unified_mtl_v1`.
-5. Сохраните вывод ячеек, commit SHA, размеры выборок, validation метрики, `gradient_audit_shared_backbone_l2`, и архив трёх файлов. До сравнения не называйте модель лучше специализированных.
+5. Сохраните вывод ячеек, commit SHA, размеры выборок, validation метрики, `gradient_audit_shared_backbone_l2`, `training.seconds` и `unified_checkpoint.pt`. До сравнения не называйте модель лучше специализированных.
 
 ## После экспорта
 

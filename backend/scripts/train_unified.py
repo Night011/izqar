@@ -163,6 +163,7 @@ def main():
             super().__init__(); self.encoders = nn.ModuleDict({n:nn.Linear(dimensions[n],32) for n in TASKS}); self.shared = nn.Sequential(nn.Linear(32,32),nn.ReLU(),nn.Linear(32,16),nn.ReLU()); self.heads=nn.ModuleDict({n:nn.Linear(16,1) for n in TASKS})
         def forward(self, name, x): return self.heads[name](self.shared(F.relu(self.encoders[name](x)))).squeeze(1)
     model = MTL().to(device); optimiser = torch.optim.AdamW(model.parameters(), lr=8e-4, weight_decay=1e-4)
+    started = time.monotonic()
     # Verify each task reaches the same backbone before optimisation.
     gradient_audit = {}
     for name in TASKS:
@@ -186,7 +187,11 @@ def main():
             for name in TASKS:
                 _,_,x,y=prepared[name]; s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); epoch_metrics[name]=round(float(average_precision_score(y,s)),6); score += epoch_metrics[name]
         history.append({'epoch':epoch+1,'loss':losses,'validation_pr_auc':epoch_metrics})
-        if score > best: best, best_state = score, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
+        if score > best:
+            best, best_state = score, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            torch.save({'epoch': epoch + 1, 'state_dict': best_state, 'optimizer_state': optimiser.state_dict(),
+                        'validation_pr_auc_sum': best, 'seed': RNG}, args.output_dir/'unified_checkpoint.pt')
     model.load_state_dict(best_state); args.output_dir.mkdir(parents=True,exist_ok=True)
     np.savez_compressed(args.output_dir/'unified_weights.npz', **{k:v.numpy().astype('float32') for k,v in best_state.items()})
     joblib.dump(preprocessors, args.output_dir/'unified_preprocessors.joblib')
@@ -195,7 +200,7 @@ def main():
     with torch.no_grad():
         for name in TASKS:
             _,_,x,y=prepared[name]; scores=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); threshold=choose_threshold(y,scores); outputs[name]={'threshold':threshold,'validation_metrics':metrics(y,scores,threshold)}
-    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1','trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1','tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,'loss':'per-task positive-weighted BCE, equal task update rounds','seed':RNG,'best_validation_pr_auc_sum':best,'history':history},'task_metadata':metadata,'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
+    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1','trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1','tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,'loss':'per-task positive-weighted BCE, equal task update rounds','seed':RNG,'best_validation_pr_auc_sum':best,'seconds':round(time.monotonic()-started,3),'history':history},'task_metadata':metadata,'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
     (args.output_dir/'unified.metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps({'output':str(args.output_dir),'tasks':outputs,'gradient_audit':gradient_audit},ensure_ascii=False,indent=2))
 
