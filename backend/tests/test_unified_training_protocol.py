@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_unified import baf, balanced_cap, choose_threshold, ieee, metrics, transformer  # noqa: E402
+from train_unified import baf, balanced_cap, choose_threshold, ieee, metrics, resolve_device, transformer  # noqa: E402
 
 
 def test_training_adapter_is_train_fitted_and_handles_unknown_categories():
@@ -77,3 +77,14 @@ def test_baf_adapter_unpacks_partition_and_boundary_contract(monkeypatch, tmp_pa
     assert len(result[0]) == len(train)
     assert len(result[2]) == len(valid)
     assert result[6]['method'].endswith('final month sealed')
+
+
+def test_auto_device_resolves_to_cpu_without_cuda():
+    assert resolve_device('auto', cuda_available=False) == 'cpu'
+    assert resolve_device('auto', cuda_available=True) == 'cuda'
+    try:
+        resolve_device('cuda', cuda_available=False)
+    except RuntimeError as exc:
+        assert 'unavailable' in str(exc)
+    else:
+        raise AssertionError('explicit CUDA must fail when unavailable')

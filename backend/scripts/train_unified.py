@@ -126,6 +126,15 @@ def to_dense(transform, frame):
     return value.toarray().astype('float32') if hasattr(value, 'toarray') else np.asarray(value, dtype='float32')
 
 
+def resolve_device(requested: str, cuda_available: bool) -> str:
+    """Resolve ``auto`` explicitly so CPU-only Kaggle sessions are supported."""
+    if requested == 'auto':
+        return 'cuda' if cuda_available else 'cpu'
+    if requested == 'cuda' and not cuda_available:
+        raise RuntimeError('CUDA requested but unavailable')
+    return requested
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--paysim', type=Path, required=True)
@@ -148,8 +157,7 @@ def main():
     except ImportError as exc:
         raise RuntimeError('PyTorch is required only for Kaggle training; local inference does not require it.') from exc
     random.seed(RNG); np.random.seed(RNG); torch.manual_seed(RNG)
-    device = 'cuda' if args.device == 'auto' and torch.cuda.is_available() else args.device
-    if device == 'cuda' and not torch.cuda.is_available(): raise RuntimeError('CUDA requested but unavailable')
+    device = resolve_device(args.device, torch.cuda.is_available())
     sources = {'paysim': lambda: paysim(args.paysim, args.max_train_rows), 'ieee_cis': lambda: ieee(args.ieee_dir, args.max_train_rows),
                'baf_base': lambda: baf(args.baf, args.max_train_rows), 'ibm_aml': lambda: ibm(args.ibm_aml, args.max_train_rows)}
     prepared, preprocessors, dimensions, metadata = {}, {}, {}, {}
