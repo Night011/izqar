@@ -119,6 +119,8 @@ BAF Base v1 обучена на 794 989 синтетических заявка�
 
 ### Обучение в Kaggle Notebooks без локальных CSV
 
+IBM AML готовится как **четвёртая отдельная задача** по метке `Is Laundering`. [Ноутбук HI-Small](notebooks/ibm_aml_kaggle.ipynb) требует **Add Input → `ealtman2019/ibm-transactions-for-anti-money-laundering-aml`**, но читает только `HI-Small_Trans.csv`. Скрипт `backend/scripts/train_ibm_aml.py` проверяет исходный заголовок с двумя одноимёнными столбцами `Account`, исключает оба счёта, банковские идентификаторы, целевую метку и сумму зачисления из ML-признаков. Разделение 70/15/15 определяется временными метками всего файла; экспериментальная ячейка обучает не более 500 000 ранних операций и **не** рассчитывает test-метрики. После просмотра validation включи `RUN_FINAL` только для одного финального прогона с полным ранним train. Экспортированный ZIP содержит XGBoost JSON, preprocessing и отчёт. Пока реального IBM-артефакта нет, `/api/v1/ibm-aml/predict` возвращает 503, а интерфейс показывает отсутствие модели. [Источник и условия данных IBM](https://github.com/IBM/AML-Data).
+
 Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.
 
 В PaySim используй обновлённый v2 notebook ниже и запусти все ячейки. В IEEE сначала запусти ячейки экспериментов и изучи validation-отчёты; финальная ячейка по умолчанию отключена (`RUN_FINAL = False`). После фиксации параметров и стратегии порога выставь `RUN_FINAL = True` и запусти её один раз. ZIP содержит метаданные, схему признаков, порог и реальные метрики; для PaySim v2 переносимый ZIP содержит preprocessing `joblib` и модель XGBoost JSON. Скачай ZIP из Output и установи только проверенные артефакты в `backend/models/`. `joblib` допускается только из доверенного собственного запуска. CSV остаются в Kaggle и не копируются в репозиторий. Для IEEE-CIS путь задаётся через `IZQAR_MODEL_PATH` или по умолчанию `backend/models/ieee_model.joblib`.
@@ -174,9 +176,11 @@ docker compose up --build
 | GET | `/api/v1/metrics` | Статистика демонстрационной базы |
 | GET | `/api/v1/graph` | Граф счетов и индикаторы fan-in/out |
 | POST | `/api/v1/demo/simulate` | Запуск одного из пяти сценариев |
-| GET | `/api/v1/model/status` | Состояние обеих независимых ML-моделей, версии, схемы и реальные метрики установленных артефактов |
+| GET | `/api/v1/model/status` | Состояние отдельных ML-моделей, версии, схемы и реальные метрики установленных артефактов |
 | POST | `/api/v1/ieee/predict` | ML-скор записи IEEE-CIS (после обучения) |
 | POST | `/api/v1/paysim/predict` | ML-скор совместимой записи PaySim (после обучения) |
+| POST | `/api/v1/baf/predict` | ML-скор заявки BAF Base (после обучения) |
+| POST | `/api/v1/ibm-aml/predict` | Скор отмывания денег IBM AML HI-Small (после обучения) |
 
 ### Тестирование
 

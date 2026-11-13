@@ -50,3 +50,7 @@ class PaySimFeaturesIn(BaseModel):
 
 class BafFeaturesIn(BaseModel):
     features: dict[str, float | str | None] = Field(min_length=1, max_length=50)
+
+
+class IbmAmlFeaturesIn(BaseModel):
+    features: dict[str, float | str | None] = Field(min_length=1, max_length=20)

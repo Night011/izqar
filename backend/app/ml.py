@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import joblib
 import sklearn
-from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH
+from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH
 
 
 def _load_artifact(path: Path, expected_kind: str):
@@ -66,6 +66,11 @@ def load_paysim_model():
 @lru_cache(maxsize=1)
 def load_baf_model():
     return _load_artifact(BAF_MODEL_PATH, 'baf_base')
+
+
+@lru_cache(maxsize=1)
+def load_ibm_aml_model():
+    return _load_artifact(IBM_AML_MODEL_PATH, 'ibm_aml')
 
 
 def predict_ieee(features: dict):
@@ -151,3 +156,41 @@ def predict_baf(features: dict):
             'model_version': artifact.get('model_version', 'unknown'),
             'score_kind': 'uncalibrated_ml_score',
             'warning': 'BAF Base is synthetic account-application data, not a calibrated fraud probability for a bank.'}
+
+
+def predict_ibm_aml(features: dict):
+    artifact = load_ibm_aml_model()
+    if artifact is None:
+        return None
+    expected = artifact['features']
+    missing = sorted(set(expected) - set(features))
+    unknown = sorted(set(features) - set(expected))
+    if missing or unknown:
+        raise ValueError(f'IBM AML schema mismatch; missing: {missing}; unsupported: {unknown}')
+    import math
+    import pandas as pd
+    frame = pd.DataFrame([{name: features[name] for name in expected}], columns=expected)
+    for col in artifact['numerical_features']:
+        if features[col] is None or isinstance(features[col], bool):
+            raise ValueError(f'{col} must be a finite number')
+        frame[col] = pd.to_numeric(frame[col], errors='coerce')
+        if not math.isfinite(float(frame[col].iloc[0])):
+            raise ValueError(f'{col} must be a finite number')
+    if frame['amount_paid'].iloc[0] < 0 or abs(float(frame['log_amount_paid'].iloc[0]) - math.log1p(float(frame['amount_paid'].iloc[0]))) > 1e-4:
+        raise ValueError('amount_paid must be nonnegative and log_amount_paid must match it')
+    if any(frame[name].iloc[0] not in (0, 1) for name in ('same_bank', 'same_currency')):
+        raise ValueError('same_bank and same_currency must be 0 or 1')
+    if not 0 <= frame['hour'].iloc[0] <= 23 or not 0 <= frame['weekday'].iloc[0] <= 6:
+        raise ValueError('hour must be 0–23 and weekday 0–6')
+    for col in artifact['categorical_features']:
+        if not isinstance(features[col], str) or not features[col].strip():
+            raise ValueError(f'{col} must be nonempty text')
+        frame[col] = frame[col].astype(str)
+    if frame['same_currency'].iloc[0] != int(features['payment_currency'] == features['receiving_currency']):
+        raise ValueError('same_currency must match payment_currency and receiving_currency')
+    score = float(artifact['pipeline'].predict_proba(frame)[0, 1])
+    return {'risk_score': round(score * 100, 2), 'threshold': artifact['threshold'],
+            'flagged': score >= artifact['threshold'], 'source': 'ibm_aml_ml',
+            'model_version': artifact.get('model_version', 'unknown'),
+            'score_kind': 'uncalibrated_ml_score',
+            'warning': 'IBM AML uses synthetic laundering labels; this is not a calibrated bank fraud probability.'}

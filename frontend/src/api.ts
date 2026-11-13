@@ -33,7 +33,8 @@ export interface ModelStatus {
   ieee_cis?: ModelDetail | null;
   paysim?: ModelDetail | null;
   baf_base?: ModelDetail | null;
-  artifact_errors?: { ieee_cis?: string | null; paysim?: string | null; baf_base?: string | null };
+  ibm_aml?: ModelDetail | null;
+  artifact_errors?: { ieee_cis?: string | null; paysim?: string | null; baf_base?: string | null; ibm_aml?: string | null };
 }
 export interface TestMetrics {
   precision: number; recall: number; f1: number; average_precision_pr_auc: number; roc_auc: number;

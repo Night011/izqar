@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session
 from .config import API_KEY, CORS_ORIGINS, validate_config
 from .database import Base, engine, get_db
 from .models import Transaction
-from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn
+from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn
 from .risk import assess
 from .graph import build_graph
-from .ml import load_model, load_paysim_model, load_baf_model, predict_ieee, predict_paysim, predict_baf
+from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -116,12 +116,19 @@ def model_status():
         baf, baf_error = None, str(exc)
     else:
         baf_error = None
-    return {'ready': bool(artifact or paysim or baf), 'mode': 'separate_models',
+    try:
+        ibm_aml = load_ibm_aml_model()
+    except RuntimeError as exc:
+        ibm_aml, ibm_aml_error = None, str(exc)
+    else:
+        ibm_aml_error = None
+    return {'ready': bool(artifact or paysim or baf or ibm_aml), 'mode': 'separate_models',
             'ieee_cis': summary(artifact),
             'paysim': summary(paysim),
             'baf_base': summary(baf),
-            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf) and not (ieee_error or paysim_error or baf_error) else None,
-            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error}}
+            'ibm_aml': summary(ibm_aml),
+            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf or ibm_aml) and not (ieee_error or paysim_error or baf_error or ibm_aml_error) else None,
+            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error, 'ibm_aml': ibm_aml_error}}
 
 @app.post('/api/v1/ieee/predict', dependencies=[Depends(require_key)])
 def ieee_predict(payload: IeeeFeaturesIn):
@@ -160,6 +167,20 @@ def baf_predict(payload: BafFeaturesIn):
         raise HTTPException(status_code=503, detail='BAF Base model is not trained or installed; see README')
     try:
         return predict_baf(payload.features)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post('/api/v1/ibm-aml/predict', dependencies=[Depends(require_key)])
+def ibm_aml_predict(payload: IbmAmlFeaturesIn):
+    try:
+        artifact = load_ibm_aml_model()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f'Incompatible IBM AML model artifact: {exc}') from exc
+    if artifact is None:
+        raise HTTPException(status_code=503, detail='IBM AML model is not trained or installed; see README')
+    try:
+        return predict_ibm_aml(payload.features)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

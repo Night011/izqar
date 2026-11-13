@@ -18,7 +18,7 @@ def export(source: Path, output_stem: Path, bundle_path: Path | None = None) -> 
         raise ValueError('Source must be a trusted .joblib artifact')
     report_path = source.with_suffix('.metrics.json')
     report = json.loads(report_path.read_text(encoding='utf-8'))
-    if report.get('format_version') != 2 or report.get('model_kind') not in {'paysim', 'ieee_cis', 'baf_base'}:
+    if report.get('format_version') != 2 or report.get('model_kind') not in {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml'}:
         raise ValueError('Unsupported source report')
     if not source.is_file():
         raise FileNotFoundError(source)

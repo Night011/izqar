@@ -16,7 +16,7 @@ function ModelCard({ title, detail, error }: { title: string; detail?: ModelDeta
       <div><span>Precision</span><strong>{pct(m.precision)}</strong></div><div><span>Recall</span><strong>{pct(m.recall)}</strong></div>
       <div><span>F1</span><strong>{pct(m.f1)}</strong></div><div><span>PR-AUC</span><strong>{pct(m.average_precision_pr_auc)}</strong></div>
       <div><span>ROC-AUC</span><strong>{pct(m.roc_auc)}</strong></div><div><span>Ложных тревог / 10k</span><strong>{m.false_alerts_per_10000_operations.toFixed(1)}</strong></div>
-    </div><p>Отложенный test: {m.cases.toLocaleString('ru-RU')} операций · матрица TN / FP / FN / TP: {m.confusion_matrix_tn_fp_fn_tp.join(' / ')}</p></>
+    </div><p>Отложенный test: {m.cases.toLocaleString('ru-RU')} записей · матрица TN / FP / FN / TP: {m.confusion_matrix_tn_fp_fn_tp.join(' / ')}</p></>
       : <p>Проверенных test-метрик в артефакте нет.</p>}
     <p>Порог решения: {detail.threshold.toFixed(4)} · Скор не откалиброван как вероятность.</p>
     {detail.feature_importance.length > 0 && <details><summary>Важность признаков XGBoost</summary><ol>{detail.feature_importance.map(item => <li key={item.feature}>{item.feature}: {item.importance.toFixed(4)}</li>)}</ol><p>Важность не доказывает причинность и отсутствие скрытой утечки.</p></details>}
@@ -24,29 +24,32 @@ function ModelCard({ title, detail, error }: { title: string; detail?: ModelDeta
 }
 
 export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; apiKey: string }) {
-  const [kind, setKind] = useState<'paysim' | 'ieee_cis' | 'baf_base'>('paysim');
+  const [kind, setKind] = useState<'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml'>('paysim');
   const [input, setInput] = useState(examplePaySim);
   const [result, setResult] = useState<ModelPrediction | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const detail = status?.[kind];
-  const changeKind = (next: 'paysim' | 'ieee_cis' | 'baf_base') => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
-  const template = () => setInput(JSON.stringify(Object.fromEntries((detail?.feature_names ?? []).map(name => [name, name === 'TransactionAmt' ? 150 : name === 'ProductCD' ? 'W' : null])), null, 2));
+  const changeKind = (next: 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml') => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
+  const template = () => setInput(JSON.stringify(Object.fromEntries((detail?.feature_names ?? []).map(name => [name,
+    kind === 'ibm_aml' ? ({ amount_paid: 150, log_amount_paid: Math.log1p(150), same_bank: 0, same_currency: 1, hour: 12, weekday: 0,
+      receiving_currency: 'USD', payment_currency: 'USD', payment_format: 'Wire' } as Record<string, number | string>)[name] :
+    name === 'TransactionAmt' ? 150 : name === 'ProductCD' ? 'W' : null])), null, 2));
   const predict = async () => {
     setBusy(true); setResult(null); setError('');
     try {
       const features = JSON.parse(input) as unknown;
       if (!features || typeof features !== 'object' || Array.isArray(features)) throw new Error('Введите JSON-объект признаков');
-      const path = kind === 'paysim' ? '/api/v1/paysim/predict' : kind === 'baf_base' ? '/api/v1/baf/predict' : '/api/v1/ieee/predict';
+      const path = kind === 'paysim' ? '/api/v1/paysim/predict' : kind === 'baf_base' ? '/api/v1/baf/predict' : kind === 'ibm_aml' ? '/api/v1/ibm-aml/predict' : '/api/v1/ieee/predict';
       setResult(await request<ModelPrediction>(path, apiKey, { method: 'POST', body: JSON.stringify({ features }) }));
     } catch (exc) { setError((exc as Error).message); }
     finally { setBusy(false); }
   };
   return <div className="ml-page">
     <p className="ml-note">Метрики получены из сохранённых артефактов соответствующих датасетов. Демо-транзакции в журнале оценивает отдельный Rule Engine.</p>
-    <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /></div>
+    <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /><ModelCard title="IBM AML · синтетические операции" detail={status?.ibm_aml} error={status?.artifact_errors?.ibm_aml} /></div>
     <section className="panel ml-card"><h2>Проверка ML-инференса</h2><p>Введите поля именно выбранной модели. Примерные значения в шаблоне служат только технической проверке API.</p>
-      <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as 'paysim' | 'ieee_cis' | 'baf_base')}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option><option value="baf_base">BAF Base</option></select><button type="button" onClick={template} disabled={!detail}>Шаблон признаков</button></div>
+      <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml')}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option><option value="baf_base">BAF Base</option><option value="ibm_aml">IBM AML</option></select><button type="button" onClick={template} disabled={!detail}>Шаблон признаков</button></div>
       <textarea aria-label="JSON признаков" spellCheck={false} value={input} onChange={e => setInput(e.target.value)} rows={9} />
       <button className="primary" disabled={!detail || busy} onClick={predict}>{busy ? 'Оцениваем…' : 'Получить оценку модели'}</button>
       {error && <p className="ml-error">{error}</p>}

@@ -106,6 +106,7 @@ function App() {
       <div className="system-row"><span className={'status-dot ' + (model?.ieee_cis ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ieee_cis ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.paysim ? '' : 'amber')} /> PaySim ML <span>{model?.paysim ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.baf_base ? '' : 'amber')} /> BAF Base ML <span>{model?.baf_base ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.ibm_aml ? '' : 'amber')} /> IBM AML ML <span>{model?.ibm_aml ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="side-bottom"><div className="mini-shield"><ShieldCheck size={17} /></div><div><strong>Hackathon MVP</strong><span>Локальная симуляция</span></div></div>
     </aside>
 
@@ -140,9 +141,9 @@ function App() {
                 })}
               </div>
               <div className="engine-info"><Cpu size={20} /><div><strong>Демонстрационные правила активны</strong><span>Оценка операций в таблице рассчитана Rule Engine.</span></div></div>
-              <div className="model-summary"><strong>ML-модели · отдельная оценка</strong>{(['paysim', 'ieee_cis'] as const).map(kind => {
+              <div className="model-summary"><strong>ML-модели · отдельная оценка</strong>{(['paysim', 'ieee_cis', 'baf_base', 'ibm_aml'] as const).map(kind => {
                 const entry = model?.[kind];
-                return <div key={kind}><span>{kind === 'paysim' ? 'PaySim' : 'IEEE-CIS'}</span><span>{entry ? `Доступна · ${entry.test_metrics ? `F1 test ${entry.test_metrics.f1.toFixed(3)}` : 'тестовых метрик нет'}` : 'Нет обученной модели'}</span></div>;
+                return <div key={kind}><span>{({ paysim: 'PaySim', ieee_cis: 'IEEE-CIS', baf_base: 'BAF Base', ibm_aml: 'IBM AML' })[kind]}</span><span>{entry ? `Доступна · ${entry.test_metrics ? `F1 test ${entry.test_metrics.f1.toFixed(3)}` : 'тестовых метрик нет'}` : 'Нет обученной модели'}</span></div>;
               })}<small>Метрики показываются только из обученных артефактов соответствующего датасета.</small></div>
             </section>
           </div>
