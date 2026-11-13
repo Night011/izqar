@@ -102,3 +102,7 @@ class BafFeaturesIn(BaseModel):
 
 class IbmAmlFeaturesIn(BaseModel):
     features: dict[str, float | str | None] = Field(min_length=1, max_length=20)
+
+
+class UnifiedFeaturesIn(BaseModel):
+    features: dict[str, float | str | None] = Field(min_length=1, max_length=100)

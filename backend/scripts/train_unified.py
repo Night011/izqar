@@ -1,0 +1,193 @@
+"""Jointly train IZQAR Unified Intelligence on four distinct fraud tasks.
+
+The labels are never merged: each dataset has its own head. Dataset adapters
+are fitted on their train period only; the shared backbone receives gradients
+from every head in round-robin batches. This script is for Kaggle CPU/GPU
+sessions where PyTorch is available. The resulting NPZ weights run locally
+through ``app.unified_network`` without PyTorch.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from train_baf import CATEGORICAL as BAF_CATS, FEATURES as BAF_FEATURES, NUMERIC as BAF_NUMS, read_base, split_months
+from train_ibm_aml import load_splits as ibm_splits, time_boundaries as ibm_boundaries, validate_file as validate_ibm
+
+TASKS = ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')
+RNG = 42
+
+
+def metrics(y, scores, threshold):
+    predicted = (scores >= threshold).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y, predicted, labels=[0, 1]).ravel()
+    return {'average_precision_pr_auc': round(float(average_precision_score(y, scores)), 6),
+            'roc_auc': round(float(roc_auc_score(y, scores)), 6),
+            'precision': round(float(precision_score(y, predicted, zero_division=0)), 6),
+            'recall': round(float(recall_score(y, predicted, zero_division=0)), 6),
+            'f1': round(float(f1_score(y, predicted, zero_division=0)), 6),
+            'confusion_matrix_tn_fp_fn_tp': [int(tn), int(fp), int(fn), int(tp)],
+            'false_positive_rate': round(float(fp / max(1, tn + fp)), 6),
+            'false_negative_rate': round(float(fn / max(1, fn + tp)), 6),
+            'false_alerts_per_10000_operations': round(float(10_000 * fp / len(y)), 3),
+            'cases': int(len(y)), 'positive_cases': int(y.sum())}
+
+
+def choose_threshold(y, scores):
+    p, r, cuts = precision_recall_curve(y, scores)
+    f = 2 * p[:-1] * r[:-1] / np.maximum(p[:-1] + r[:-1], 1e-12)
+    return float(cuts[int(np.argmax(f))])
+
+
+def balanced_cap(frame, target, cap):
+    """Chronology is retained; deterministic uniform thinning prevents RAM spikes."""
+    if len(frame) <= cap:
+        return frame.reset_index(drop=True), target
+    index = np.linspace(0, len(frame) - 1, cap, dtype=np.int64)
+    return frame.iloc[index].reset_index(drop=True), np.asarray(target)[index]
+
+
+def transformer(numbers, categories):
+    return ColumnTransformer([
+        ('numeric', Pipeline([('impute', SimpleImputer(strategy='median')), ('scale', StandardScaler())]), numbers),
+        ('category', Pipeline([('impute', SimpleImputer(strategy='constant', fill_value='__missing__')),
+                               ('onehot', OneHotEncoder(handle_unknown='ignore', min_frequency=25))]), categories),
+    ])
+
+
+def paysim(path, cap):
+    required = ['step', 'type', 'amount', 'oldbalanceOrg', 'oldbalanceDest', 'isFraud']
+    data = pd.read_csv(path, usecols=required, dtype={'step':'int32','amount':'float32','oldbalanceOrg':'float32','oldbalanceDest':'float32','isFraud':'int8','type':'category'})
+    data = data.sort_values('step', kind='stable').reset_index(drop=True)
+    first, second = data.step.iloc[int(.70 * len(data))], data.step.iloc[int(.85 * len(data))]
+    train, valid = data[data.step < first], data[(data.step >= first) & (data.step < second)]
+    fields = ['type','amount','oldbalanceOrg','oldbalanceDest']
+    return (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields[:1], fields[1:],
+            {'method':'70/15/15 chronological step; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','isFlaggedFraud','newbalanceOrig','newbalanceDest','nameOrig','nameDest','step']})
+
+
+def ieee(data_dir, cap):
+    tx = pd.read_csv(data_dir / 'train_transaction.csv', usecols=['TransactionID','TransactionDT','TransactionAmt','card1','card2','card3','card5','addr1','dist1','ProductCD','card4','card6','P_emaildomain','isFraud'], low_memory=False)
+    tx = tx.sort_values(['TransactionDT','TransactionID'], kind='stable').reset_index(drop=True)
+    first, second = tx.TransactionDT.iloc[int(.70 * len(tx))], tx.TransactionDT.iloc[int(.85 * len(tx))]
+    fields_num = ['TransactionAmt','card1','card2','card3','card5','addr1','dist1']
+    fields_cat = ['ProductCD','card4','card6','P_emaildomain']
+    fields = fields_num + fields_cat
+    train, valid = tx[tx.TransactionDT < first], tx[(tx.TransactionDT >= first) & (tx.TransactionDT < second)]
+    return (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields_cat, fields_num,
+            {'method':'70/15/15 chronological TransactionDT; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','TransactionID','TransactionDT']})
+
+
+def baf(path, cap):
+    data = read_base(path)
+    train, valid, _ = split_months(data)
+    return (train[BAF_FEATURES], train.fraud_bool.to_numpy(), valid[BAF_FEATURES], valid.fraud_bool.to_numpy(), BAF_CATS, BAF_NUMS,
+            {'method':'earlier months train, penultimate validation, final month sealed', 'excluded':['fraud_bool','month','device_fraud_count','days_since_request','credit_risk_score']})
+
+
+def ibm(path, cap):
+    validate_ibm(path)
+    first, second, total, available = ibm_boundaries(path)
+    parts, counts = ibm_splits(path, first, second, available, cap, False)
+    train, valid = parts['train'], parts['validation']
+    numbers = ['amount_paid','log_amount_paid','same_bank','same_currency','hour','weekday']
+    cats = ['receiving_currency','payment_currency','payment_format']
+    return (*train, *valid, cats, numbers,
+            {'method':'70/15/15 timestamp; final 15% sealed and never loaded for tuning', 'rows_total':total, 'excluded':['Is Laundering','Account','Account.1','Amount Received','raw bank identifiers']})
+
+
+def to_dense(transform, frame):
+    value = transform.transform(frame)
+    return value.toarray().astype('float32') if hasattr(value, 'toarray') else np.asarray(value, dtype='float32')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--paysim', type=Path, required=True)
+    parser.add_argument('--ieee-dir', type=Path, required=True)
+    parser.add_argument('--baf', type=Path, required=True)
+    parser.add_argument('--ibm-aml', type=Path, required=True)
+    parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--max-train-rows', type=int, default=150_000)
+    parser.add_argument('--max-validation-rows', type=int, default=75_000)
+    parser.add_argument('--epochs', type=int, default=12)
+    parser.add_argument('--batch-size', type=int, default=1024)
+    parser.add_argument('--device', default='auto', choices=['auto','cpu','cuda'])
+    args = parser.parse_args()
+    if min(args.max_train_rows, args.max_validation_rows, args.epochs, args.batch_size) < 1:
+        parser.error('all limits must be positive')
+    try:
+        import torch
+        from torch import nn
+        from torch.nn import functional as F
+    except ImportError as exc:
+        raise RuntimeError('PyTorch is required only for Kaggle training; local inference does not require it.') from exc
+    random.seed(RNG); np.random.seed(RNG); torch.manual_seed(RNG)
+    device = 'cuda' if args.device == 'auto' and torch.cuda.is_available() else args.device
+    if device == 'cuda' and not torch.cuda.is_available(): raise RuntimeError('CUDA requested but unavailable')
+    sources = {'paysim': lambda: paysim(args.paysim, args.max_train_rows), 'ieee_cis': lambda: ieee(args.ieee_dir, args.max_train_rows),
+               'baf_base': lambda: baf(args.baf, args.max_train_rows), 'ibm_aml': lambda: ibm(args.ibm_aml, args.max_train_rows)}
+    prepared, preprocessors, dimensions, metadata = {}, {}, {}, {}
+    for name in TASKS:
+        xtr, ytr, xva, yva, cats, nums, audit = sources[name]()
+        xtr, ytr = balanced_cap(xtr, ytr, args.max_train_rows); xva, yva = balanced_cap(xva, yva, args.max_validation_rows)
+        pre = transformer(nums, cats).fit(xtr)
+        prepared[name] = (to_dense(pre, xtr), ytr.astype('float32'), to_dense(pre, xva), yva.astype('int8'))
+        preprocessors[name] = pre; dimensions[name] = int(prepared[name][0].shape[1]); metadata[name] = {**audit, 'train_used':len(ytr), 'validation_used':len(yva), 'positive_train':int(ytr.sum()), 'feature_schema': {'all': nums + cats, 'numerical': nums, 'categorical': cats}}
+    class MTL(nn.Module):
+        def __init__(self):
+            super().__init__(); self.encoders = nn.ModuleDict({n:nn.Linear(dimensions[n],32) for n in TASKS}); self.shared = nn.Sequential(nn.Linear(32,32),nn.ReLU(),nn.Linear(32,16),nn.ReLU()); self.heads=nn.ModuleDict({n:nn.Linear(16,1) for n in TASKS})
+        def forward(self, name, x): return self.heads[name](self.shared(F.relu(self.encoders[name](x)))).squeeze(1)
+    model = MTL().to(device); optimiser = torch.optim.AdamW(model.parameters(), lr=8e-4, weight_decay=1e-4)
+    # Verify each task reaches the same backbone before optimisation.
+    gradient_audit = {}
+    for name in TASKS:
+        x, y, _, _ = prepared[name]; take = min(len(x), args.batch_size); optimiser.zero_grad(set_to_none=True)
+        loss = F.binary_cross_entropy_with_logits(model(name, torch.tensor(x[:take], device=device)), torch.tensor(y[:take], device=device), pos_weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device)); loss.backward()
+        gradient_audit[name] = round(float(model.shared[0].weight.grad.norm().detach().cpu()), 8)
+    if any(value <= 0 for value in gradient_audit.values()): raise RuntimeError(f'No shared-backbone gradient: {gradient_audit}')
+    best, best_state, history = float('-inf'), None, []
+    for epoch in range(args.epochs):
+        model.train(); losses = {}
+        for name in TASKS:
+            x, y, _, _ = prepared[name]; order = np.random.permutation(len(x)); limit = min(len(x), 50_000)
+            values=[]
+            for start in range(0, limit, args.batch_size):
+                ix=order[start:start+args.batch_size]; xb=torch.tensor(x[ix],device=device); yb=torch.tensor(y[ix],device=device)
+                weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device); optimiser.zero_grad(set_to_none=True)
+                loss=F.binary_cross_entropy_with_logits(model(name, xb),yb,pos_weight=weight); loss.backward(); optimiser.step(); values.append(float(loss.detach().cpu()))
+            losses[name]=round(float(np.mean(values)),6)
+        model.eval(); score=0; epoch_metrics={}
+        with torch.no_grad():
+            for name in TASKS:
+                _,_,x,y=prepared[name]; s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); epoch_metrics[name]=round(float(average_precision_score(y,s)),6); score += epoch_metrics[name]
+        history.append({'epoch':epoch+1,'loss':losses,'validation_pr_auc':epoch_metrics})
+        if score > best: best, best_state = score, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
+    model.load_state_dict(best_state); args.output_dir.mkdir(parents=True,exist_ok=True)
+    np.savez_compressed(args.output_dir/'unified_weights.npz', **{k:v.numpy().astype('float32') for k,v in best_state.items()})
+    joblib.dump(preprocessors, args.output_dir/'unified_preprocessors.joblib')
+    outputs={}
+    model.eval()
+    with torch.no_grad():
+        for name in TASKS:
+            _,_,x,y=prepared[name]; scores=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); threshold=choose_threshold(y,scores); outputs[name]={'threshold':threshold,'validation_metrics':metrics(y,scores,threshold)}
+    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1','trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1','tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,'loss':'per-task positive-weighted BCE, equal task update rounds','seed':RNG,'best_validation_pr_auc_sum':best,'history':history},'task_metadata':metadata,'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
+    (args.output_dir/'unified.metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+    print(json.dumps({'output':str(args.output_dir),'tasks':outputs,'gradient_audit':gradient_audit},ensure_ascii=False,indent=2))
+
+if __name__ == '__main__': main()

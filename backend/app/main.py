@@ -9,16 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, validate_config
+from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH, validate_config
 from .database import Base, engine, get_db
 from .models import Transaction, InvestigationEvent
 from .schemas import (TransferIn, TransactionOut, SimulationIn, ReviewIn, CommentIn,
                       InvestigationEventOut, InvestigationListOut, InvestigationDetailOut,
-                      IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn)
+                      IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn, UnifiedFeaturesIn)
 from .risk import assess
 from .graph import build_graph
 from .model_registry import list_registry
-from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml
+from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, load_unified_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml, predict_unified
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -200,20 +200,43 @@ def model_status():
         ibm_aml, ibm_aml_error = None, str(exc)
     else:
         ibm_aml_error = None
+    try:
+        unified = load_unified_model()
+    except RuntimeError as exc:
+        unified, unified_error = None, str(exc)
+    else:
+        unified_error = None
     return {'ready': bool(artifact or paysim or baf or ibm_aml), 'mode': 'separate_models',
             'ieee_cis': summary(artifact),
             'paysim': summary(paysim),
             'baf_base': summary(baf),
             'ibm_aml': summary(ibm_aml),
+            'unified_mtl': ({'model_version': unified['report']['model_version'], 'tasks': unified['report']['tasks'],
+                             'score_kind': 'uncalibrated_ml_score', 'experimental': True} if unified else None),
             'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf or ibm_aml) and not (ieee_error or paysim_error or baf_error or ibm_aml_error) else None,
-            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error, 'ibm_aml': ibm_aml_error}}
+            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error, 'ibm_aml': ibm_aml_error, 'unified_mtl': unified_error}}
 
 
 @app.get('/api/v1/model/registry', dependencies=[Depends(require_key)])
 def model_registry():
     return list_registry({'ieee_cis': MODEL_PATH, 'paysim': PAYSIM_MODEL_PATH,
-                          'baf_base': BAF_MODEL_PATH, 'ibm_aml': IBM_AML_MODEL_PATH},
+                          'baf_base': BAF_MODEL_PATH, 'ibm_aml': IBM_AML_MODEL_PATH,
+                          'izqar_unified_mtl': UNIFIED_MODEL_PATH},
                          BACKEND_ROOT / 'models')
+
+
+@app.post('/api/v1/unified/{task}/predict', dependencies=[Depends(require_key)])
+def unified_predict(task: str, payload: UnifiedFeaturesIn):
+    try:
+        artifact = load_unified_model()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f'Incompatible Unified model artifact: {exc}') from exc
+    if artifact is None:
+        raise HTTPException(status_code=503, detail='Unified Intelligence artifact is not installed; it remains experimental')
+    try:
+        return predict_unified(task, payload.features)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 @app.post('/api/v1/ieee/predict', dependencies=[Depends(require_key)])
 def ieee_predict(payload: IeeeFeaturesIn):

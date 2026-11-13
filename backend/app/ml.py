@@ -4,7 +4,8 @@ from pathlib import Path
 import json
 import joblib
 import sklearn
-from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH
+from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH
+from .unified_network import TASKS as UNIFIED_TASKS, UnifiedNetwork
 
 
 def _load_artifact(path: Path, expected_kind: str):
@@ -71,6 +72,43 @@ def load_baf_model():
 @lru_cache(maxsize=1)
 def load_ibm_aml_model():
     return _load_artifact(IBM_AML_MODEL_PATH, 'ibm_aml')
+
+
+@lru_cache(maxsize=1)
+def load_unified_model():
+    """Load a trusted Kaggle export only after strict manifest validation."""
+    path = Path(UNIFIED_MODEL_PATH)
+    if not path.is_file():
+        return None
+    try:
+        report = json.loads(path.read_text(encoding='utf-8'))
+        if (report.get('format_version') != 1 or report.get('model_kind') != 'izqar_unified_mtl'
+                or report.get('serialization') != 'numpy_shared_backbone_v1'):
+            raise ValueError('unsupported manifest')
+        task_metadata = report.get('task_metadata', {})
+        dimensions = report.get('input_dimensions')
+        if set(task_metadata) != set(UNIFIED_TASKS) or not isinstance(dimensions, dict):
+            raise ValueError('all four task adapters are required')
+        schema = {}
+        for task in UNIFIED_TASKS:
+            item = task_metadata[task].get('feature_schema', {})
+            all_features, numerical, categorical = item.get('all'), item.get('numerical'), item.get('categorical')
+            if (not isinstance(all_features, list) or not all_features or set(all_features) != set(numerical or []) | set(categorical or [])
+                    or len(all_features) != len(set(all_features))):
+                raise ValueError(f'invalid {task} input schema')
+            schema[task] = {'all': all_features, 'numerical': numerical, 'categorical': categorical}
+        stem = path.name.removesuffix('.metrics.json')
+        weights = path.with_name(stem + '_weights.npz')
+        preprocessors_path = path.with_name(stem + '_preprocessors.joblib')
+        if not weights.is_file() or not preprocessors_path.is_file():
+            raise ValueError('unified model component missing')
+        preprocessors = joblib.load(preprocessors_path)
+        if set(preprocessors) != set(UNIFIED_TASKS):
+            raise ValueError('preprocessor task mismatch')
+        network = UnifiedNetwork.from_npz(weights, dimensions)
+        return {'report': report, 'network': network, 'preprocessors': preprocessors, 'schema': schema}
+    except Exception as exc:
+        raise RuntimeError(f'Unable to load unified model artifact ({type(exc).__name__})') from exc
 
 
 def predict_ieee(features: dict):
@@ -194,3 +232,32 @@ def predict_ibm_aml(features: dict):
             'model_version': artifact.get('model_version', 'unknown'),
             'score_kind': 'uncalibrated_ml_score',
             'warning': 'IBM AML uses synthetic laundering labels; this is not a calibrated bank fraud probability.'}
+
+
+def predict_unified(task: str, features: dict):
+    artifact = load_unified_model()
+    if artifact is None:
+        return None
+    if task not in UNIFIED_TASKS:
+        raise ValueError('Unknown unified task')
+    schema = artifact['schema'][task]
+    expected = schema['all']
+    missing, unknown = sorted(set(expected) - set(features)), sorted(set(features) - set(expected))
+    if missing or unknown:
+        raise ValueError(f'Unified {task} schema mismatch; missing: {missing}; unsupported: {unknown}')
+    import pandas as pd
+    frame = pd.DataFrame([{name: features[name] for name in expected}], columns=expected)
+    for name in schema['numerical']:
+        frame[name] = pd.to_numeric(frame[name], errors='coerce')
+        if features[name] is not None and pd.isna(frame[name].iloc[0]):
+            raise ValueError(f'{name} must be numeric or null')
+    for name in schema['categorical']:
+        if features[name] is not None and not isinstance(features[name], str):
+            raise ValueError(f'{name} must be text or null')
+    transformed = artifact['preprocessors'][task].transform(frame)
+    score = float(artifact['network'].predict_scores(task, transformed)[0])
+    threshold = artifact['report']['tasks'][task]['threshold']
+    return {'risk_score': round(score * 100, 2), 'threshold': threshold, 'flagged': score >= threshold,
+            'source': 'izqar_unified_mtl_experimental', 'model_version': artifact['report']['model_version'],
+            'score_kind': 'uncalibrated_ml_score',
+            'warning': 'Experimental joint model. This is not a calibrated probability and does not replace the specialised detector unless validation comparison supports it.'}

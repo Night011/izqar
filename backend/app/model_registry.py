@@ -8,7 +8,7 @@ from pathlib import Path
 
 MAX_REPORT_BYTES = 2 * 1024 * 1024
 MAX_ENTRIES = 100
-KINDS = {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml'}
+KINDS = {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml', 'izqar_unified_mtl'}
 FORBIDDEN = {'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest',
              'TransactionID', 'TransactionDT', 'fraud_bool', 'Is Laundering',
              'Account', 'Account.1'}
@@ -28,6 +28,8 @@ def _report_path(path: Path) -> Path:
 
 def _components(report_path: Path, report: dict) -> list[Path]:
     stem = report_path.name.removesuffix('.metrics.json')
+    if report.get('format_version') == 1 and report.get('serialization') == 'numpy_shared_backbone_v1':
+        return [report_path.with_name(stem + '_preprocessors.joblib'), report_path.with_name(stem + '_weights.npz')]
     if report.get('format_version') == 3 and report.get('serialization') == 'portable_xgboost_v1':
         return [report_path.with_name(stem + '.preprocessor.joblib'),
                 report_path.with_name(stem + '.xgboost.json')]
@@ -48,13 +50,30 @@ def _entry(report_path: Path, active_kind: str | None) -> dict:
         kind = report.get('model_kind')
         if kind not in KINDS or (active_kind is not None and kind != active_kind):
             raise ValueError('model kind mismatch')
-        features = report.get('features')
+        if kind == 'izqar_unified_mtl':
+            tasks = report.get('task_metadata', {})
+            if set(tasks) != {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml'}:
+                raise ValueError('unified task schema is incomplete')
+            features = []
+            task_schemas = {}
+            for task, metadata in tasks.items():
+                schema = metadata.get('feature_schema', {}).get('all')
+                if not isinstance(schema, list) or not schema or any(not isinstance(x, str) for x in schema):
+                    raise ValueError(f'invalid unified {task} feature schema')
+                if len(schema) != len(set(schema)) or set(schema) & FORBIDDEN:
+                    raise ValueError(f'forbidden or duplicate unified {task} feature')
+                task_schemas[task] = schema
+                features.extend(f'{task}.{name}' for name in schema)
+            threshold = None
+        else:
+            task_schemas = None
+            features = report.get('features')
+            threshold = report.get('threshold')
         if not isinstance(features, list) or not features or any(not isinstance(x, str) for x in features):
             raise ValueError('invalid feature schema')
-        if len(set(features)) != len(features) or set(features) & FORBIDDEN:
+        if len(set(features)) != len(features) or (kind != 'izqar_unified_mtl' and set(features) & FORBIDDEN):
             raise ValueError('forbidden or duplicate model feature')
-        threshold = report.get('threshold')
-        if not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        if kind != 'izqar_unified_mtl' and (not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1):
             raise ValueError('invalid threshold')
         files = _components(report_path, report)
         if not files:
@@ -65,9 +84,10 @@ def _entry(report_path: Path, active_kind: str | None) -> dict:
                        'dataset': report.get('dataset'), 'trained_at_utc': report.get('trained_at_utc'),
                        'format_version': report.get('format_version'), 'feature_count': len(features),
                        'features': features, 'threshold': threshold,
+                       'task_schemas': task_schemas, 'experimental': kind == 'izqar_unified_mtl',
                        'data_files': report.get('data_files', []),
                        'split_counts': report.get('split_counts', {}),
-                       'validation_metrics': report.get('validation_metrics'),
+                       'validation_metrics': report.get('validation_metrics') or report.get('tasks'),
                        'test_metrics': report.get('test_metrics'),
                        'manifest_sha256': _sha256(report_path), 'components': components,
                        'state': 'installed' if len(components) == len(files) else 'report_only'})

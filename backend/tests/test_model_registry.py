@@ -39,3 +39,21 @@ def test_registry_rejects_leaky_schema_and_protects_api(client, auth, tmp_path):
     response = client.get('/api/v1/model/registry', headers=auth)
     assert response.status_code == 200
     assert response.json()['registry_version'] == 1
+
+
+def test_registry_accepts_unified_manifest_only_with_four_clean_task_schemas(tmp_path):
+    root = tmp_path / 'models'; root.mkdir()
+    tasks = {task: {'feature_schema': {'all': ['amount'], 'numerical': ['amount'], 'categorical': []}}
+             for task in ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')}
+    report = {'format_version': 1, 'serialization': 'numpy_shared_backbone_v1',
+              'model_kind': 'izqar_unified_mtl', 'model_version': 'unified-test',
+              'task_metadata': tasks, 'tasks': {task: {'threshold': .5} for task in tasks}}
+    manifest = root / 'unified.metrics.json'; manifest.write_text(json.dumps(report), encoding='utf-8')
+    (root / 'unified_preprocessors.joblib').write_bytes(b'trusted-only-placeholder')
+    (root / 'unified_weights.npz').write_bytes(b'not-loaded-by-registry')
+    result = list_registry({'izqar_unified_mtl': manifest}, root)['entries'][0]
+    assert result['state'] == 'installed' and result['experimental'] is True
+    assert result['task_schemas']['paysim'] == ['amount']
+    tasks['paysim']['feature_schema']['all'] = ['isFraud']
+    manifest.write_text(json.dumps(report), encoding='utf-8')
+    assert list_registry({'izqar_unified_mtl': manifest}, root)['entries'][0]['state'] == 'invalid'
