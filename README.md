@@ -103,6 +103,16 @@ python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_l
 
 PaySim и IEEE-CIS не объединяются и не сравниваются как одна популяция. Их оценки доступны только через отдельные API: `/api/v1/paysim/predict` и `/api/v1/ieee/predict`.
 
+## BAF Base: отдельный детектор заявок
+
+[Feedzai BAF](https://github.com/feedzai/bank-account-fraud) моделирует заявки на открытие счетов, а не переводы. Пайплайн `backend/scripts/train_baf.py` использует только вариант `Base.csv`, явный список признаков заявки, `fraud_bool` как y и `month` только для разделения. Более ранние месяцы образуют train, предпоследний validation, последний закрытый test. Поле `device_fraud_count` и признаки с неясной доступностью на момент заявки исключены. Для лёгкого запуска используй [BAF Kaggle notebook](notebooks/baf_kaggle.ipynb) с **Add Input → `sgpjesus/bank-account-fraud-dataset-neurips-2022`**. Сначала изучи validation-отчёт; `RUN_FINAL` в последней ячейке по умолчанию выключен. Реальных метрик и установленной BAF-модели пока нет, пока ноутбук не выполнил финальный запуск.
+
+При разрешённом доступе к собственному CSV можно выполнить локальный эксперимент из `backend/`, не затрагивая закрытый test:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_baf.py --data data\baf\Base.csv --mode experiment --output models\experiments\baf_base_trial_01.joblib --estimators 180 --max-false-alerts-per-10000 100
+```
+
 ### Обучение в Kaggle Notebooks без локальных CSV
 
 Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.

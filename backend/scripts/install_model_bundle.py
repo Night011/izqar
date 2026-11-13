@@ -51,7 +51,7 @@ def install(bundle: Path, destination: Path, expected_sha256: str | None = None)
             raise ValueError('Bundle contains unsupported or missing files')
         if archive.testzip() is not None:
             raise ValueError('Bundle CRC check failed')
-        if report.get('model_kind') not in {'paysim', 'ieee_cis'} or report.get('model_version') is None:
+        if report.get('model_kind') not in {'paysim', 'ieee_cis', 'baf_base'} or report.get('model_version') is None:
             raise ValueError('Missing or unsupported model metadata')
         if report.get('library_versions', {}).get('scikit_learn') != sklearn.__version__:
             raise ValueError(f"Model requires scikit-learn {report.get('library_versions', {}).get('scikit_learn')}; runtime has {sklearn.__version__}")
