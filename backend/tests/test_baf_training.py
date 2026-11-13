@@ -8,6 +8,8 @@ import pytest
 pd = pytest.importorskip('pandas')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_baf import CATEGORICAL, FEATURES, NUMERIC, read_base, train  # noqa: E402
+from export_portable_model import export as export_portable_model  # noqa: E402
+from install_model_bundle import install as install_model_bundle  # noqa: E402
 
 
 def make_base(path: Path):
@@ -24,7 +26,7 @@ def make_base(path: Path):
     pd.DataFrame(data).to_csv(path, index=False)
 
 
-def test_baf_base_train_and_final_holdout(tmp_path):
+def test_baf_base_train_and_final_holdout(tmp_path, client, auth, monkeypatch):
     path = tmp_path / 'Base.csv'
     make_base(path)
     data = read_base(path)
@@ -46,6 +48,26 @@ def test_baf_base_train_and_final_holdout(tmp_path):
     assert saved['test_metrics'] == final_report['test_metrics']
     with pytest.raises(FileExistsError):
         train(path, final, n_estimators=8, mode='final')
+    import app.ml as ml
+    sample = pd.read_csv(path).iloc[10][FEATURES].to_dict()
+    with monkeypatch.context() as patch:
+        patch.setattr(ml, 'BAF_MODEL_PATH', final)
+        ml.load_baf_model.cache_clear()
+        status = client.get('/api/v1/model/status', headers=auth)
+        assert status.status_code == 200
+        assert status.json()['baf_base']['model_version'] == 'baf-base-xgboost-v1'
+        response = client.post('/api/v1/baf/predict', json={'features': sample}, headers=auth)
+        assert response.status_code == 200, response.text
+        assert response.json()['source'] == 'baf_base_ml'
+        assert client.post('/api/v1/baf/predict', json={'features': {**sample, 'fraud_bool': 1}}, headers=auth).status_code == 422
+        bundle = export_portable_model(final, tmp_path / 'baf_portable')
+        install_model_bundle(bundle, tmp_path / 'installed')
+        patch.setattr(ml, 'BAF_MODEL_PATH', tmp_path / 'installed' / 'baf_portable.metrics.json')
+        ml.load_baf_model.cache_clear()
+        portable_response = client.post('/api/v1/baf/predict', json={'features': sample}, headers=auth)
+        assert portable_response.status_code == 200, portable_response.text
+        assert portable_response.json()['risk_score'] == response.json()['risk_score']
+    ml.load_baf_model.cache_clear()
 
 
 def test_baf_rejects_wrong_variant_and_missing_schema(tmp_path):

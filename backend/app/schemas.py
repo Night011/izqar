@@ -46,3 +46,7 @@ class IeeeFeaturesIn(BaseModel):
 
 class PaySimFeaturesIn(BaseModel):
     features: dict[str, float | str | None] = Field(min_length=4, max_length=4)
+
+
+class BafFeaturesIn(BaseModel):
+    features: dict[str, float | str | None] = Field(min_length=1, max_length=50)

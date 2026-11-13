@@ -105,6 +105,7 @@ function App() {
       <div className="system-row"><span className="status-dot" /> Rule Engine <span>Активен</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.ieee_cis ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ieee_cis ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.paysim ? '' : 'amber')} /> PaySim ML <span>{model?.paysim ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.baf_base ? '' : 'amber')} /> BAF Base ML <span>{model?.baf_base ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="side-bottom"><div className="mini-shield"><ShieldCheck size={17} /></div><div><strong>Hackathon MVP</strong><span>Локальная симуляция</span></div></div>
     </aside>
 

@@ -50,6 +50,8 @@ def test_validation_and_model_unavailable(client, auth):
     assert missing.status_code == 503
     paysim = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0}}, headers=auth)
     assert paysim.status_code == 503  # no artifact must never generate a score
+    baf = client.post('/api/v1/baf/predict', json={'features': {'income': 0.5}}, headers=auth)
+    assert baf.status_code == 503
     leaked = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0, 'isFraud': 1}}, headers=auth)
     assert leaked.status_code == 422
     status = client.get('/api/v1/model/status', headers=auth)

@@ -24,29 +24,29 @@ function ModelCard({ title, detail, error }: { title: string; detail?: ModelDeta
 }
 
 export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; apiKey: string }) {
-  const [kind, setKind] = useState<'paysim' | 'ieee_cis'>('paysim');
+  const [kind, setKind] = useState<'paysim' | 'ieee_cis' | 'baf_base'>('paysim');
   const [input, setInput] = useState(examplePaySim);
   const [result, setResult] = useState<ModelPrediction | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const detail = status?.[kind];
-  const changeKind = (next: 'paysim' | 'ieee_cis') => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
+  const changeKind = (next: 'paysim' | 'ieee_cis' | 'baf_base') => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
   const template = () => setInput(JSON.stringify(Object.fromEntries((detail?.feature_names ?? []).map(name => [name, name === 'TransactionAmt' ? 150 : name === 'ProductCD' ? 'W' : null])), null, 2));
   const predict = async () => {
     setBusy(true); setResult(null); setError('');
     try {
       const features = JSON.parse(input) as unknown;
       if (!features || typeof features !== 'object' || Array.isArray(features)) throw new Error('Введите JSON-объект признаков');
-      const path = kind === 'paysim' ? '/api/v1/paysim/predict' : '/api/v1/ieee/predict';
+      const path = kind === 'paysim' ? '/api/v1/paysim/predict' : kind === 'baf_base' ? '/api/v1/baf/predict' : '/api/v1/ieee/predict';
       setResult(await request<ModelPrediction>(path, apiKey, { method: 'POST', body: JSON.stringify({ features }) }));
     } catch (exc) { setError((exc as Error).message); }
     finally { setBusy(false); }
   };
   return <div className="ml-page">
     <p className="ml-note">Метрики получены из сохранённых артефактов соответствующих датасетов. Демо-транзакции в журнале оценивает отдельный Rule Engine.</p>
-    <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /></div>
+    <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /></div>
     <section className="panel ml-card"><h2>Проверка ML-инференса</h2><p>Введите поля именно выбранной модели. Примерные значения в шаблоне служат только технической проверке API.</p>
-      <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as 'paysim' | 'ieee_cis')}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option></select><button type="button" onClick={template} disabled={!detail}>Шаблон признаков</button></div>
+      <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as 'paysim' | 'ieee_cis' | 'baf_base')}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option><option value="baf_base">BAF Base</option></select><button type="button" onClick={template} disabled={!detail}>Шаблон признаков</button></div>
       <textarea aria-label="JSON признаков" spellCheck={false} value={input} onChange={e => setInput(e.target.value)} rows={9} />
       <button className="primary" disabled={!detail || busy} onClick={predict}>{busy ? 'Оцениваем…' : 'Получить оценку модели'}</button>
       {error && <p className="ml-error">{error}</p>}

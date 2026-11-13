@@ -113,6 +113,8 @@ PaySim и IEEE-CIS не объединяются и не сравниваютс�
 .\.venv\Scripts\python.exe scripts\train_baf.py --data data\baf\Base.csv --mode experiment --output models\experiments\baf_base_trial_01.joblib --estimators 180 --max-false-alerts-per-10000 100
 ```
 
+После фактического финального обучения архив `izqar_baf_base_v1_portable.zip` можно установить через `scripts/install_model_bundle.py`, указать в `.env` путь `IZQAR_BAF_MODEL_PATH` к установленному `baf_base_v1_portable.metrics.json` и перезапустить API. Отдельный `/api/v1/baf/predict` принимает `{"features": {...}}` строго по сохранённому списку признаков; при отсутствии модели возвращает 503. Страница ML Analytics показывает BAF как «не установлена», пока реальный артефакт не подключён.
+
 ### Обучение в Kaggle Notebooks без локальных CSV
 
 Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.

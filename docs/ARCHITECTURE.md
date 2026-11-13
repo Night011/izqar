@@ -34,6 +34,12 @@ PaySim CSV
            └─models/paysim_model_v2_portable.metrics.json
               + .preprocessor.joblib + .xgboost.json
               └─POST /api/v1/paysim/predict
+
+BAF Base.csv (заявки на открытие счёта)
+  └─Предпоследний `month` validation, последний `month` final test
+     └─Явный список признаков заявки; `fraud_bool` только y
+        └─models/baf_base_v1_portable.metrics.json + preprocessing + XGBoost JSON
+           └─POST /api/v1/baf/predict (503, пока артефакт не установлен)
 ```
 
 Значения скоров симулятора **не** подаются в IEEE-модель и наоборот.

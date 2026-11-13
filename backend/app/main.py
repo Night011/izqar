@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session
 from .config import API_KEY, CORS_ORIGINS, validate_config
 from .database import Base, engine, get_db
 from .models import Transaction
-from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn
+from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn
 from .risk import assess
 from .graph import build_graph
-from .ml import load_model, load_paysim_model, predict_ieee, predict_paysim
+from .ml import load_model, load_paysim_model, load_baf_model, predict_ieee, predict_paysim, predict_baf
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -110,11 +110,18 @@ def model_status():
         paysim, paysim_error = None, str(exc)
     else:
         paysim_error = None
-    return {'ready': bool(artifact or paysim), 'mode': 'separate_models',
+    try:
+        baf = load_baf_model()
+    except RuntimeError as exc:
+        baf, baf_error = None, str(exc)
+    else:
+        baf_error = None
+    return {'ready': bool(artifact or paysim or baf), 'mode': 'separate_models',
             'ieee_cis': summary(artifact),
             'paysim': summary(paysim),
-            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim) and not (ieee_error or paysim_error) else None,
-            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error}}
+            'baf_base': summary(baf),
+            'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf) and not (ieee_error or paysim_error or baf_error) else None,
+            'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error}}
 
 @app.post('/api/v1/ieee/predict', dependencies=[Depends(require_key)])
 def ieee_predict(payload: IeeeFeaturesIn):
@@ -139,6 +146,20 @@ def paysim_predict(payload: PaySimFeaturesIn):
         raise HTTPException(status_code=503, detail='Сначала обучите модель PaySim; см. README')
     try:
         return predict_paysim(payload.features)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post('/api/v1/baf/predict', dependencies=[Depends(require_key)])
+def baf_predict(payload: BafFeaturesIn):
+    try:
+        artifact = load_baf_model()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f'Incompatible BAF model artifact: {exc}') from exc
+    if artifact is None:
+        raise HTTPException(status_code=503, detail='BAF Base model is not trained or installed; see README')
+    try:
+        return predict_baf(payload.features)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

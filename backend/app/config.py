@@ -13,6 +13,7 @@ DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///./izqar.db')
 API_KEY = os.environ.get('IZQAR_API_KEY', '')
 MODEL_PATH = Path(os.environ.get('IZQAR_MODEL_PATH', str(BACKEND_ROOT / 'models' / 'ieee_model.joblib')))
 PAYSIM_MODEL_PATH = Path(os.environ.get('IZQAR_PAYSIM_MODEL_PATH', str(BACKEND_ROOT / 'models' / 'paysim_model.joblib')))
+BAF_MODEL_PATH = Path(os.environ.get('IZQAR_BAF_MODEL_PATH', str(BACKEND_ROOT / 'models' / 'baf_base_v1_portable.metrics.json')))
 CORS_ORIGINS = [s.strip() for s in os.environ.get('IZQAR_CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',') if s.strip()]
 
 

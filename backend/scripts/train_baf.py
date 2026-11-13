@@ -90,7 +90,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     if train_rows.fraud_bool.nunique() != 2:
         raise ValueError('Selected training rows must contain both classes')
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True))])
-    categorical = OneHotEncoder(handle_unknown='ignore', max_categories=20)
+    categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
+                            ('onehot', OneHotEncoder(handle_unknown='ignore', max_categories=20))])
     preprocessing = ColumnTransformer([('numeric', numeric, NUMERIC), ('categorical', categorical, CATEGORICAL)])
     y_train = train_rows.fraud_bool.astype('int8')
     pos = int(y_train.sum())
@@ -104,7 +105,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     baseline_pre = ColumnTransformer([
         ('numeric', Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True)),
                               ('scale', StandardScaler(with_mean=False))]), NUMERIC),
-        ('categorical', OneHotEncoder(handle_unknown='ignore', max_categories=20), CATEGORICAL),
+        ('categorical', Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
+                                  ('onehot', OneHotEncoder(handle_unknown='ignore', max_categories=20))]), CATEGORICAL),
     ])
     baseline = Pipeline([('preprocessing', baseline_pre),
                          ('model', LogisticRegression(solver='liblinear', max_iter=500, tol=1e-3,
