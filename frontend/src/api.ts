@@ -34,8 +34,10 @@ export interface ModelStatus {
   paysim?: ModelDetail | null;
   baf_base?: ModelDetail | null;
   ibm_aml?: ModelDetail | null;
-  artifact_errors?: { ieee_cis?: string | null; paysim?: string | null; baf_base?: string | null; ibm_aml?: string | null };
+  unified_mtl?: UnifiedDetail | null;
+  artifact_errors?: { ieee_cis?: string | null; paysim?: string | null; baf_base?: string | null; ibm_aml?: string | null; unified_mtl?: string | null };
 }
+export interface UnifiedDetail { model_version: string; experimental: true; score_kind: string; tasks: Record<string, { threshold: number; validation_metrics: TestMetrics }> }
 export interface TestMetrics {
   precision: number; recall: number; f1: number; average_precision_pr_auc: number; roc_auc: number;
   confusion_matrix_tn_fp_fn_tp: [number, number, number, number];

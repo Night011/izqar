@@ -6,7 +6,7 @@ import './model-registry.css';
 
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const examplePaySim = JSON.stringify({ type: 'TRANSFER', amount: 150000, oldbalanceOrg: 180000, oldbalanceDest: 20000 }, null, 2);
-const names: Record<string, string> = { paysim: 'PaySim', ieee_cis: 'IEEE-CIS', baf_base: 'BAF Base', ibm_aml: 'IBM AML' };
+const names: Record<string, string> = { paysim: 'PaySim', ieee_cis: 'IEEE-CIS', baf_base: 'BAF Base', ibm_aml: 'IBM AML', izqar_unified_mtl: 'Unified Intelligence' };
 
 function RegistryRow({ entry }: { entry: RegistryEntry }) {
   const label = entry.state === 'installed' ? 'Артефакт установлен' : entry.state === 'report_only' ? 'Только отчёт' : 'Ошибка метаданных';
@@ -33,6 +33,11 @@ function ModelCard({ title, detail, error }: { title: string; detail?: ModelDeta
     <p>Порог решения: {detail.threshold.toFixed(4)} · Скор не откалиброван как вероятность.</p>
     {detail.feature_importance.length > 0 && <details><summary>Важность признаков XGBoost</summary><ol>{detail.feature_importance.map(item => <li key={item.feature}>{item.feature}: {item.importance.toFixed(4)}</li>)}</ol><p>Важность не доказывает причинность и отсутствие скрытой утечки.</p></details>}
   </section>;
+}
+
+function UnifiedCard({ detail, error }: { detail?: import('./api').UnifiedDetail | null; error?: string | null }) {
+  if (!detail) return <section className="panel ml-card"><h2>Unified Intelligence · эксперимент</h2><p>{error ? `Ошибка артефакта: ${error}` : 'Совместно обученный артефакт ещё не установлен'}</p><p>Четыре специализированные модели остаются рабочими детекторами.</p></section>;
+  return <section className="panel ml-card"><div className="ml-card-head"><div><h2>Unified Intelligence · эксперимент</h2><p>{detail.model_version} · общий backbone и четыре независимые головы</p></div><span className="count-tag">validation only</span></div><p>Метрики ниже нельзя сопоставлять с ранее просмотренными финальными test специализированных моделей.</p><div className="ml-metrics">{Object.entries(detail.tasks).map(([task, item]) => <div key={task}><span>{names[task]}</span><strong>F1 {item.validation_metrics.f1.toFixed(3)}</strong><small>PR-AUC {item.validation_metrics.average_precision_pr_auc.toFixed(3)}</small></div>)}</div><p>Экспериментальный uncalibrated score. Отрицательный перенос проверяется сравнением на соответствующих validation-периодах.</p></section>;
 }
 
 export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; apiKey: string }) {
@@ -67,7 +72,7 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
   };
   return <div className="ml-page">
     <p className="ml-note">Метрики получены из сохранённых артефактов соответствующих датасетов. Демо-транзакции в журнале оценивает отдельный Rule Engine.</p>
-    <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /><ModelCard title="IBM AML · синтетические операции" detail={status?.ibm_aml} error={status?.artifact_errors?.ibm_aml} /></div>
+    <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /><ModelCard title="IBM AML · синтетические операции" detail={status?.ibm_aml} error={status?.artifact_errors?.ibm_aml} /><UnifiedCard detail={status?.unified_mtl} error={status?.artifact_errors?.unified_mtl} /></div>
     <section className="panel ml-card"><h2>Model Registry</h2><p>Активные артефакты и история экспериментов. Контрольные суммы подтверждают идентичность файлов, а метрики взяты из сохранённых отчётов.</p>
       {registryError && <p className="ml-error">Ошибка реестра: {registryError}</p>}
       {registry && <><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Test</th><th>Аудит</th></tr></thead><tbody>
