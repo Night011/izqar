@@ -87,6 +87,17 @@ def graph(limit: int = Query(default=500, ge=1, le=1000), window_minutes: int = 
 
 @app.get('/api/v1/model/status', dependencies=[Depends(require_key)])
 def model_status():
+    def summary(artifact):
+        if artifact is None:
+            return None
+        return {'features': len(artifact['features']), 'feature_names': artifact['features'],
+                'test_metrics': artifact.get('test_metrics'), 'threshold': artifact['threshold'],
+                'model_version': artifact.get('model_version', 'unknown'),
+                'dataset': artifact.get('dataset', 'unknown'),
+                'trained_at_utc': artifact.get('trained_at_utc'),
+                'split_counts': artifact.get('split_counts', {}),
+                'score_kind': 'uncalibrated_ml_score',
+                'feature_importance': artifact.get('feature_importance', {}).get('top_30', [])[:10]}
     try:
         artifact = load_model()
     except RuntimeError as exc:
@@ -100,8 +111,8 @@ def model_status():
     else:
         paysim_error = None
     return {'ready': bool(artifact or paysim), 'mode': 'separate_models',
-            'ieee_cis': None if not artifact else {'features': len(artifact['features']), 'test_metrics': artifact.get('test_metrics', {}), 'threshold': artifact['threshold']},
-            'paysim': None if not paysim else {'features': len(paysim['features']), 'test_metrics': paysim.get('test_metrics', {}), 'threshold': paysim['threshold']},
+            'ieee_cis': summary(artifact),
+            'paysim': summary(paysim),
             'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim) and not (ieee_error or paysim_error) else None,
             'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error}}
 

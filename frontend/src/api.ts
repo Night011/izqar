@@ -30,8 +30,24 @@ export interface GraphData {
 }
 export interface ModelStatus {
   ready: boolean; mode: string; message?: string;
-  ieee_cis?: { features: number; test_metrics: Record<string, number | number[]>; threshold: number } | null;
-  paysim?: { features: number; test_metrics: Record<string, number | number[]>; threshold: number } | null;
+  ieee_cis?: ModelDetail | null;
+  paysim?: ModelDetail | null;
+  artifact_errors?: { ieee_cis?: string | null; paysim?: string | null };
+}
+export interface TestMetrics {
+  precision: number; recall: number; f1: number; average_precision_pr_auc: number; roc_auc: number;
+  confusion_matrix_tn_fp_fn_tp: [number, number, number, number];
+  false_alerts_per_10000_operations: number; cases: number; fraud_cases: number;
+}
+export interface ModelDetail {
+  features: number; feature_names: string[]; test_metrics: TestMetrics | null; threshold: number;
+  model_version: string; dataset: string; trained_at_utc?: string;
+  split_counts: Record<string, number>; score_kind: string;
+  feature_importance: { feature: string; importance: number }[];
+}
+export interface ModelPrediction {
+  risk_score: number; threshold: number; flagged: boolean; source: string;
+  model_version: string; score_kind: string; warning: string;
 }
 
 const ROOT = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';

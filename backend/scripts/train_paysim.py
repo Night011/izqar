@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sys
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,11 +21,12 @@ import pandas as pd
 import sklearn
 import xgboost
 from sklearn.compose import ColumnTransformer
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, confusion_matrix, f1_score, precision_recall_curve, precision_score, recall_score, roc_auc_score
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 FEATURES = ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
@@ -95,13 +97,27 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     ])
     y_train = train_rows['isFraud'].astype(int)
     positives, negatives = int(y_train.sum()), int(len(y_train) - y_train.sum())
-    baseline = Pipeline([('preprocessing', transform), ('model', LogisticRegression(max_iter=300, class_weight='balanced', solver='saga', n_jobs=min(4, os.cpu_count() or 1)))])
+    baseline_transform = ColumnTransformer([
+        ('numeric', Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True)),
+                              ('scale', StandardScaler(with_mean=False)),
+                              ('clip', FunctionTransformer(np.clip, kw_args={'a_min': -20, 'a_max': 20}))]), NUMERIC),
+        ('category', OneHotEncoder(handle_unknown='ignore'), CATEGORICAL),
+    ])
+    baseline = Pipeline([('preprocessing', baseline_transform),
+                         ('model', LogisticRegression(max_iter=1000, tol=1e-3, class_weight='balanced', solver='liblinear'))])
     model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.065, subsample=.85, colsample_bytree=.85,
                           reg_lambda=3, objective='binary:logistic', tree_method='hist', eval_metric='aucpr', random_state=42,
                           n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=negatives / positives)
     pipeline = Pipeline([('preprocessing', transform), ('model', model)])
-    baseline.fit(train_rows[FEATURES], y_train)
+    with warnings.catch_warnings():
+        warnings.filterwarnings('error', category=ConvergenceWarning)
+        baseline.fit(train_rows[FEATURES], y_train)
+    if baseline.named_steps['model'].n_iter_[0] >= 1000:
+        raise RuntimeError('PaySim baseline logistic regression did not converge')
     pipeline.fit(train_rows[FEATURES], y_train)
+    encoded_features = pipeline.named_steps['preprocessing'].get_feature_names_out()
+    importances = pipeline.named_steps['model'].feature_importances_
+    ranked = sorted(zip(encoded_features, importances), key=lambda item: item[1], reverse=True)
     valid_scores = pipeline.predict_proba(valid_rows[FEATURES])[:, 1]
     threshold = choose_threshold(valid_rows['isFraud'].astype(int), valid_scores)
     test_scores = pipeline.predict_proba(test_rows[FEATURES])[:, 1]
@@ -115,6 +131,9 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
         'test_metrics': evaluate(test_rows['isFraud'].astype(int), test_scores, threshold),
         'baseline_test_metrics': evaluate(test_rows['isFraud'].astype(int), baseline.predict_proba(test_rows[FEATURES])[:, 1], .5),
+        'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True},
+        'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)} for name, value in ranked[:30]],
+                               'leakage_audit': 'Encoded features derive only from type, amount, oldbalanceOrg and oldbalanceDest; importance does not establish causality.'},
         'split_method': '70/15/15 chronological step ascending',
         'excluded_for_leakage': ['isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'],
         'warning': 'PaySim is synthetic; output is an uncalibrated research-model score, not a banking fraud probability.',

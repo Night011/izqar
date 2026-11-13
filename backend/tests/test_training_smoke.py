@@ -13,7 +13,7 @@ from train_ieee import train as train_ieee  # noqa: E402
 from train_paysim import train as train_paysim  # noqa: E402
 
 
-def test_both_trainers_create_separate_artifacts(tmp_path):
+def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeypatch):
     rows = 300
     paysim = pd.DataFrame({
         'step': range(rows), 'type': ['TRANSFER' if i % 2 else 'PAYMENT' for i in range(rows)],
@@ -32,6 +32,9 @@ def test_both_trainers_create_separate_artifacts(tmp_path):
     assert pay_report['model_kind'] == 'paysim'
     assert pay_report['test_metrics']['cases'] == 45
     assert 'isFraud' not in pay_report['features']
+    assert pay_report['baseline_convergence']['converged'] is True
+    assert pay_report['feature_importance']['top_30']
+    assert all('isFraud' not in row['feature'] and 'newbalance' not in row['feature'] for row in pay_report['feature_importance']['top_30'])
 
     ieee_dir = tmp_path / 'ieee'
     ieee_dir.mkdir()
@@ -62,6 +65,27 @@ def test_both_trainers_create_separate_artifacts(tmp_path):
     assert experiment_report['split_boundaries'] == ieee_report['split_boundaries']
     assert experiment_report['split_counts']['final_test'] == ieee_report['split_counts']['final_test']
     assert experiment_report['split_counts']['train_used'] == 100
+    import app.ml as ml
+    with monkeypatch.context() as patch:
+        patch.setattr(ml, 'MODEL_PATH', ieee_model)
+        patch.setattr(ml, 'PAYSIM_MODEL_PATH', pay_model)
+        ml.load_model.cache_clear()
+        ml.load_paysim_model.cache_clear()
+        status = client.get('/api/v1/model/status', headers=auth)
+        assert status.status_code == 200
+        assert status.json()['ieee_cis']['model_version'] == 'ieee-cis-xgboost-v2'
+        assert status.json()['paysim']['model_version'] == 'paysim-xgboost-v1'
+        pay_features = {'type': 'TRANSFER', 'amount': 25, 'oldbalanceOrg': 110, 'oldbalanceDest': 5}
+        pay_response = client.post('/api/v1/paysim/predict', json={'features': pay_features}, headers=auth)
+        assert pay_response.status_code == 200, pay_response.text
+        assert pay_response.json()['source'] == 'paysim_ml'
+        ieee_features = {key: None for key in ieee_report['features']}
+        ieee_features['TransactionAmt'] = 25
+        ieee_response = client.post('/api/v1/ieee/predict', json={'features': ieee_features}, headers=auth)
+        assert ieee_response.status_code == 200, ieee_response.text
+        assert ieee_response.json()['source'] == 'ieee_cis_ml'
+    ml.load_model.cache_clear()
+    ml.load_paysim_model.cache_clear()
 
 
 def test_ieee_rejects_duplicate_transaction_id(tmp_path):
