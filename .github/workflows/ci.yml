@@ -1,0 +1,33 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install API/test dependencies
+        run: pip install -r backend/requirements-dev.txt
+      - name: Run tests
+        working-directory: backend
+        env:
+          IZQAR_API_KEY: ci-local-only-secret-12345678901234567890
+        run: python -m pytest -q
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Check types and build
+        working-directory: frontend
+        run: npm run build
