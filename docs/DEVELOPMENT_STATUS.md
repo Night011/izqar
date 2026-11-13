@@ -14,7 +14,7 @@
 
 ## Платформа
 
-- React: мониторинг, Model Registry, ML Analytics, интерактивный NetworkX/Cytoscape граф и рабочее место расследований.
+- React: мониторинг, Model Registry, ML Analytics, интерактивный NetworkX/Cytoscape граф и рабочее место расследований. Граф ограниченно показывает fan-in/fan-out, быстрые цепочки и направленные трёхузловые циклы как сигналы, а не доказательства.
 - Backend: четыре специализированных endpoint-инференса; очередь расследований, статусы, комментарии и append-only `investigation_events` для синтетических переводов.
 - Unified endpoint: `POST /api/v1/unified/{paysim|ieee_cis|baf_base|ibm_aml}/predict` подготовлен, но честно возвращает 503 до установки совместно обученного артефакта.
 - Локальная проверка: 36 backend-тестов прошли; React build прошёл. В том числе проверены Unified adapter protocol, NumPy shared-backbone inference, 503 при отсутствии артефакта и загрузка тестового доверенного экспорта.

@@ -39,6 +39,10 @@ def test_graph_fan_in_and_velocity(client, auth):
     assert chain.status_code == 200
     graph = client.get('/api/v1/graph', headers=auth).json()
     assert any(c['path'] == ['SOURCE-110', 'LINK-111', 'LINK-112'] for c in graph['indicators']['rapid_transfer_chains'])
+    cycle = client.post('/api/v1/demo/simulate', json={'scenario': 'cycle'}, headers=auth)
+    assert cycle.status_code == 200
+    graph = client.get('/api/v1/graph', headers=auth).json()
+    assert ['CYCLE-201', 'CYCLE-202', 'CYCLE-203', 'CYCLE-201'] in graph['indicators']['directed_three_node_cycles']
 
 
 def test_validation_and_model_unavailable(client, auth):

@@ -87,7 +87,7 @@ class InvestigationDetailOut(BaseModel):
     related_transactions: list[TransactionOut]
 
 class SimulationIn(BaseModel):
-    scenario: Literal['normal', 'new_recipient', 'velocity', 'fan_in', 'chain']
+    scenario: Literal['normal', 'new_recipient', 'velocity', 'fan_in', 'chain', 'cycle']
 
 class IeeeFeaturesIn(BaseModel):
     features: dict[str, float | str | None] = Field(min_length=1, max_length=100)

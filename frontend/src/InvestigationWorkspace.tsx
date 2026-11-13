@@ -46,7 +46,7 @@ function caseGraph(detail: InvestigationDetail): GraphData {
     indicators: {
       high_fan_in_accounts: nodes.filter(n => n.in_degree >= 3).map(n => n.id),
       high_fan_out_accounts: nodes.filter(n => n.out_degree >= 3).map(n => n.id),
-      rapid_transfer_chains: [], window_minutes: 0,
+      rapid_transfer_chains: [], directed_three_node_cycles: [], window_minutes: 0,
       note: 'Показаны только операция и до 50 связанных записей из базы. Графовая связь не доказывает мошенничество.',
     },
   };

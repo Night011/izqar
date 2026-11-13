@@ -318,6 +318,11 @@ def simulate(payload: SimulationIn, db: Session = Depends(get_db)):
             ('LINK-112', 'LINK-113', 640_000, False, False),
             ('LINK-113', 'DEST-114', 610_000, False, False),
         ],
+        'cycle': [
+            ('CYCLE-201', 'CYCLE-202', 420_000, False, False),
+            ('CYCLE-202', 'CYCLE-203', 400_000, False, False),
+            ('CYCLE-203', 'CYCLE-201', 385_000, True, False),
+        ],
     }
     result = []
     for sender, recipient, amount, device_changed, external_flag in samples[payload.scenario]:

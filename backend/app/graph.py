@@ -35,10 +35,26 @@ def build_graph(db: Session, limit: int = 500, window_minutes: int = 1440) -> di
             if 0 <= delta <= 900 and len(rapid_chains) < 20:
                 rapid_chains.append({'path': [first.sender, first.recipient, tx.recipient], 'minutes_between': round(delta / 60, 2), 'amounts': [round(first.amount, 2), round(tx.amount, 2)]})
         recent_inbound[tx.recipient] = tx
+    # Bounded directed cycles are investigation leads. Avoid enumerating all
+    # simple cycles: that can be exponential on a large transaction graph.
+    cycle_paths = []
+    adjacency = {node: set(graph.successors(node)) for node in graph.nodes}
+    seen_cycles = set()
+    for first in sorted(adjacency):
+        for second in sorted(adjacency[first]):
+            for third in sorted(adjacency.get(second, ())):
+                if first not in adjacency.get(third, ()) or len({first, second, third}) != 3:
+                    continue
+                rotations = [tuple([first, second, third]), tuple([second, third, first]), tuple([third, first, second])]
+                key = min(rotations)
+                if key not in seen_cycles and len(cycle_paths) < 20:
+                    seen_cycles.add(key)
+                    cycle_paths.append(list(key) + [key[0]])
     indicators = {
         'high_fan_in_accounts': [n['id'] for n in nodes if n['in_degree'] >= 3],
         'high_fan_out_accounts': [n['id'] for n in nodes if n['out_degree'] >= 3],
         'rapid_transfer_chains': rapid_chains,
+        'directed_three_node_cycles': cycle_paths,
         'window_minutes': window_minutes,
         'note': 'Граф отражает временные и структурные признаки, но не доказывает мошенничество.'
     }

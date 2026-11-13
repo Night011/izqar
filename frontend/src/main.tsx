@@ -16,12 +16,13 @@ const scenarios: { type: Scenario; label: string; description: string }[] = [
   { type: 'velocity', label: 'Серия переводов', description: 'Много операций за короткое время' },
   { type: 'fan_in', label: 'Сеть получателей', description: 'Несколько отправителей → один счёт' },
   { type: 'chain', label: 'Цепочка переводов', description: 'Последовательное движение средств' },
+  { type: 'cycle', label: 'Цикл переводов', description: 'Замкнутое направление средств' },
 ];
 const riskLabels = { low: 'Низкий риск', medium: 'Средний риск', high: 'Высокий риск' };
 const decisionLabels: Record<string, string> = { allow: 'Разрешено', step_up: 'Доп. проверка', review: 'На рассмотрении' };
 const reviewLabels: Record<Review, string> = { pending: 'Не проверено', in_review: 'Изучается', step_up: 'Доп. подтверждение', escalated: 'На расследовании', allowed: 'Разрешено аналитиком', confirmed_fraud: 'Подтверждено аналитиком', false_positive: 'Ложная тревога' };
 const blank: Metrics = { transactions: 0, simulated_volume_kzt: 0, high: 0, medium: 0, low: 0, reviewed: 0, disclaimer: '' };
-const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], rapid_transfer_chains: [], window_minutes: 1440, note: '' } };
+const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], rapid_transfer_chains: [], directed_three_node_cycles: [], window_minutes: 1440, note: '' } };
 
 function App() {
   const [key, setKey] = useState(() => sessionStorage.getItem('izqar-api-key') ?? '');

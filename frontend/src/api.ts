@@ -1,5 +1,5 @@
 export type RiskLevel = 'low' | 'medium' | 'high';
-export type Scenario = 'normal' | 'new_recipient' | 'velocity' | 'fan_in' | 'chain';
+export type Scenario = 'normal' | 'new_recipient' | 'velocity' | 'fan_in' | 'chain' | 'cycle';
 export type Review = 'pending' | 'in_review' | 'step_up' | 'escalated' | 'allowed' | 'confirmed_fraud' | 'false_positive';
 
 export interface Transaction {
@@ -26,7 +26,7 @@ export interface Metrics {
 export interface GraphData {
   nodes: { id: string; in_degree: number; out_degree: number; flagged: boolean }[];
   edges: { source: string; target: string; count: number; total_amount: number; latest_at: string }[];
-  indicators: { high_fan_in_accounts: string[]; high_fan_out_accounts: string[]; rapid_transfer_chains: unknown[]; window_minutes: number; note: string };
+  indicators: { high_fan_in_accounts: string[]; high_fan_out_accounts: string[]; rapid_transfer_chains: unknown[]; directed_three_node_cycles: string[][]; window_minutes: number; note: string };
 }
 export interface ModelStatus {
   ready: boolean; mode: string; message?: string;
