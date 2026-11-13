@@ -1,6 +1,6 @@
 export type RiskLevel = 'low' | 'medium' | 'high';
 export type Scenario = 'normal' | 'new_recipient' | 'velocity' | 'fan_in' | 'chain';
-export type Review = 'pending' | 'confirmed_fraud' | 'false_positive';
+export type Review = 'pending' | 'in_review' | 'step_up' | 'escalated' | 'allowed' | 'confirmed_fraud' | 'false_positive';
 
 export interface Transaction {
   id: string;
@@ -60,6 +60,16 @@ export interface RegistryEntry {
   validation_metrics?: TestMetrics | null; test_metrics?: TestMetrics | null;
 }
 export interface ModelRegistry { registry_version: number; entries: RegistryEntry[]; note: string }
+export interface InvestigationEvent {
+  id: string; transaction_id: string; created_at: string; action: 'decision' | 'comment';
+  from_state: Review | null; to_state: Review | null; comment: string | null;
+  actor_source: string;
+}
+export interface InvestigationList { total: number; items: Transaction[] }
+export interface InvestigationDetail {
+  transaction: Transaction; events: InvestigationEvent[]; events_total: number;
+  related_transactions: Transaction[];
+}
 
 const ROOT = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 export async function request<T>(path: string, key: string, options: RequestInit = {}): Promise<T> {

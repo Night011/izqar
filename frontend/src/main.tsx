@@ -3,10 +3,12 @@ import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronRight, CircleHelp, Clock, Cpu, Fingerprint, GitBranch, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Search, Shield, ShieldAlert, ShieldCheck, Wallet, X } from 'lucide-react';
 import { Graph } from './Graph';
 import { MLAnalytics } from './MLAnalytics';
+import { InvestigationWorkspace } from './InvestigationWorkspace';
 import { money, request, shortDate } from './api';
 import type { GraphData, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
 import './styles.css';
 import './model-summary.css';
+import './investigations.css';
 
 const scenarios: { type: Scenario; label: string; description: string }[] = [
   { type: 'normal', label: 'Обычная оплата', description: 'Небольшая покупка' },
@@ -17,7 +19,7 @@ const scenarios: { type: Scenario; label: string; description: string }[] = [
 ];
 const riskLabels = { low: 'Низкий риск', medium: 'Средний риск', high: 'Высокий риск' };
 const decisionLabels: Record<string, string> = { allow: 'Разрешено', step_up: 'Доп. проверка', review: 'На рассмотрении' };
-const reviewLabels: Record<Review, string> = { pending: 'Не проверено', confirmed_fraud: 'Подтверждено аналитиком', false_positive: 'Ложная тревога' };
+const reviewLabels: Record<Review, string> = { pending: 'Не проверено', in_review: 'Изучается', step_up: 'Доп. подтверждение', escalated: 'На расследовании', allowed: 'Разрешено аналитиком', confirmed_fraud: 'Подтверждено аналитиком', false_positive: 'Ложная тревога' };
 const blank: Metrics = { transactions: 0, simulated_volume_kzt: 0, high: 0, medium: 0, low: 0, reviewed: 0, disclaimer: '' };
 const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], rapid_transfer_chains: [], window_minutes: 1440, note: '' } };
 
@@ -30,7 +32,8 @@ function App() {
   const [graph, setGraph] = useState<GraphData>(emptyGraph);
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
-  const [tab, setTab] = useState<'overview' | 'network' | 'ml'>('overview');
+  const [tab, setTab] = useState<'overview' | 'investigations' | 'network' | 'ml'>('overview');
+  const [investigationFocus, setInvestigationFocus] = useState<string | null>(null);
   const [busy, setBusy] = useState<Scenario | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
@@ -96,6 +99,7 @@ function App() {
       <div className="side-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <nav>
         <button className={'nav-item ' + (tab === 'overview' ? 'active' : '')} onClick={() => setTab('overview')}><BarChart3 size={18} /> Обзор системы <ChevronRight size={15} /></button>
+        <button className={'nav-item ' + (tab === 'investigations' ? 'active' : '')} onClick={() => { setInvestigationFocus(null); setTab('investigations'); }}><ShieldAlert size={18} /> Расследования <ChevronRight size={15} /></button>
         <button className={'nav-item ' + (tab === 'network' ? 'active' : '')} onClick={() => setTab('network')}><GitBranch size={18} /> Граф связей <ChevronRight size={15} /></button>
         <button className={'nav-item ' + (tab === 'ml' ? 'active' : '')} onClick={() => setTab('ml')}><Cpu size={18} /> ML Analytics <ChevronRight size={15} /></button>
       </nav>
@@ -112,11 +116,11 @@ function App() {
 
     <div className="main-frame">
       <header className="topbar">
-        <div className="breadcrumb">Платформа <ChevronRight size={14} /> <strong>{tab === 'overview' ? 'Обзор системы' : tab === 'network' ? 'Граф связей' : 'ML Analytics'}</strong></div>
+        <div className="breadcrumb">Платформа <ChevronRight size={14} /> <strong>{tab === 'overview' ? 'Обзор системы' : tab === 'investigations' ? 'Расследования' : tab === 'network' ? 'Граф связей' : 'ML Analytics'}</strong></div>
         <div className="top-actions"><span className="demo-tag"><span className="status-dot" /> DEMO ENVIRONMENT</span><button title="Обновить" className="icon-button" onClick={() => refresh(key).catch((e: Error) => setError(e.message))}><RefreshCcw size={18} /></button><button title="Выйти" className="icon-button" onClick={logout}><LogOut size={18} /></button></div>
       </header>
       <main className="content">
-        <div className="page-heading"><div><div className="eyebrow">IZQAR / FRAUD INTELLIGENCE</div><h1>{tab === 'overview' ? 'Центр мониторинга' : tab === 'network' ? 'Анализ связей' : 'Аналитика моделей'}</h1><p>{tab === 'overview' ? 'Оценка рисков и расследование подозрительных операций.' : tab === 'network' ? 'Исследование структуры переводов между синтетическими счетами.' : 'Фактические тестовые метрики и отдельные ML-прогнозы.'}</p></div><span className="date-stamp"><Clock size={15} /> Демо-режим · KZT</span></div>
+        <div className="page-heading"><div><div className="eyebrow">IZQAR / FRAUD INTELLIGENCE</div><h1>{tab === 'overview' ? 'Центр мониторинга' : tab === 'investigations' ? 'Рабочее место аналитика' : tab === 'network' ? 'Анализ связей' : 'Аналитика моделей'}</h1><p>{tab === 'overview' ? 'Оценка рисков и расследование подозрительных операций.' : tab === 'investigations' ? 'Очередь, связанные счета, решения и журнал действий.' : tab === 'network' ? 'Исследование структуры переводов между синтетическими счетами.' : 'Фактические тестовые метрики и отдельные ML-прогнозы.'}</p></div><span className="date-stamp"><Clock size={15} /> Демо-режим · KZT</span></div>
         <div className="disclaimer"><CircleHelp size={16} /> <span><strong>Исследовательский прототип.</strong> Все операции синтетические. Оценки в таблице рассчитаны правилами, не ML-моделью. Банк и реальные клиенты не подключены.</span></div>
         {error && <div className="error-banner"><AlertTriangle size={17}/>{error}<button onClick={() => setError('')} aria-label="Закрыть"><X size={15}/></button></div>}
 
@@ -152,7 +156,7 @@ function App() {
             <div className="table-tools"><div className="search"><Search size={16} /><input aria-label="Поиск счёта" value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск счёта или сценария" /></div><div className="filter-row">{(['all','low','medium','high'] as const).map(f => <button className={'filter-btn '+(filter===f?'on':'')} key={f} onClick={() => setFilter(f)}>{f==='all'?'Все':riskLabels[f]}</button>)}</div></div>
             <div className="table-wrap"><table><thead><tr><th>ВРЕМЯ</th><th>ОТПРАВИТЕЛЬ / ПОЛУЧАТЕЛЬ</th><th>СУММА</th><th>РИСК</th><th>РЕШЕНИЕ</th><th /></tr></thead><tbody>{visibleRows.map(tx => <tr key={tx.id} onClick={() => setSelected(tx)} className="transaction-row"><td className="muted">{shortDate(tx.created_at)}</td><td><div className="account-flow">{tx.sender}<ArrowRight size={13}/>{tx.recipient}</div></td><td className="amount-cell">{money(tx.amount)}</td><td><span className={'risk-chip '+tx.risk_level}><i/>{riskLabels[tx.risk_level]} · {tx.risk_score}</span></td><td className="muted">{decisionLabels[tx.decision]}</td><td><ChevronRight size={16}/></td></tr>)}</tbody></table>{!visibleRows.length && <div className="empty-state"><Activity size={25}/><strong>Пока нет операций</strong><span>Запустите сценарий выше, чтобы начать демонстрацию.</span></div>}</div>
           </section>
-        </> : tab === 'network' ? <>
+        </> : tab === 'investigations' ? <InvestigationWorkspace apiKey={key} initialId={investigationFocus} onChanged={() => refresh(key)} /> : tab === 'network' ? <>
           <div className="graph-summary"><Stat label="Счетов в выборке" value={String(graph.nodes.length)} info="Уникальные узлы" icon={<Fingerprint size={19}/>} /><Stat label="Направлений переводов" value={String(graph.edges.length)} info="Рёбра графа" icon={<GitBranch size={19}/>} /><Stat label="Высокий входящий поток" value={String(graph.indicators.high_fan_in_accounts.length)} info="3+ разных отправителя" icon={<ArrowDownLeft size={19}/>} /><Stat label="Высокий исходящий поток" value={String(graph.indicators.high_fan_out_accounts.length)} info="3+ разных получателя" icon={<ArrowUpRight size={19}/>} /></div>
           <section className="panel graph-panel"><div className="panel-header"><div><h2>Финансовая сеть</h2><p>Оранжевым отмечены узлы с повышенной входящей или исходящей связностью</p></div><span className="count-tag">NetworkX + Cytoscape</span></div>{graph.nodes.length ? <Graph data={graph} /> : <div className="empty-state big"><GitBranch size={27}/><strong>Нет связей</strong><span>В разделе «Обзор системы» запустите сценарий «Сеть получателей».</span></div>}</section>
           <div className="panel graph-note"><Shield size={20}/><p>{graph.indicators.note || 'Структурные сигналы графа не означают доказанное мошенничество.'}</p></div>
@@ -165,7 +169,7 @@ function App() {
       <div className="drawer-data"><div><span>Сумма</span><strong>{money(selected.amount)}</strong></div><div><span>Отправитель</span><strong>{selected.sender}</strong></div><div><span>Получатель</span><strong>{selected.recipient}</strong></div><div><span>Дата операции</span><strong>{shortDate(selected.created_at)}</strong></div><div><span>Решение системы</span><strong>{decisionLabels[selected.decision]}</strong></div><div><span>Статус проверки</span><strong>{reviewLabels[selected.review_state]}</strong></div></div>
       <h3>Почему система присвоила этот риск</h3><div className="reasons">{selected.reasons.map((r, i)=><div key={i}><AlertTriangle size={16}/>{r}</div>)}</div>
       <div className="drawer-disclaimer">Скор не является статистически откалиброванной вероятностью мошенничества. Решение демонстрационное.</div>
-      <h3>Решение аналитика</h3><div className="review-actions"><button onClick={() => updateReview(selected, 'confirmed_fraud')}><ShieldAlert size={16}/> Подтвердить риск</button><button onClick={() => updateReview(selected, 'false_positive')}><Check size={16}/> Ложная тревога</button></div>
+      <h3>Решение аналитика</h3><div className="review-actions"><button onClick={() => { setInvestigationFocus(selected.id); setSelected(null); setTab('investigations'); }}><ShieldAlert size={16}/> Открыть расследование</button><button onClick={() => updateReview(selected, 'false_positive')}><Check size={16}/> Ложная тревога</button></div>
     </aside></div>}
   </div>;
 }

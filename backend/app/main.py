@@ -3,15 +3,18 @@ from __future__ import annotations
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from fastapi import FastAPI, Depends, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, validate_config
 from .database import Base, engine, get_db
-from .models import Transaction
-from .schemas import TransferIn, TransactionOut, SimulationIn, ReviewIn, IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn
+from .models import Transaction, InvestigationEvent
+from .schemas import (TransferIn, TransactionOut, SimulationIn, ReviewIn, CommentIn,
+                      InvestigationEventOut, InvestigationListOut, InvestigationDetailOut,
+                      IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn)
 from .risk import assess
 from .graph import build_graph
 from .model_registry import list_registry
@@ -66,10 +69,84 @@ def review(tx_id: str, payload: ReviewIn, db: Session = Depends(get_db)):
     tx = db.get(Transaction, tx_id)
     if tx is None:
         raise HTTPException(status_code=404, detail='Транзакция не найдена')
+    previous = tx.review_state
     tx.review_state = payload.review_state
+    db.add(InvestigationEvent(transaction_id=tx.id, action='decision',
+                              from_state=previous, to_state=payload.review_state,
+                              comment=payload.comment))
     db.commit()
     db.refresh(tx)
     return tx
+
+
+@app.get('/api/v1/investigations', response_model=InvestigationListOut, dependencies=[Depends(require_key)])
+def investigations(
+    status: Literal['all', 'pending', 'in_review', 'step_up', 'escalated', 'allowed',
+                    'confirmed_fraud', 'false_positive'] = 'all',
+    risk_level: Literal['all', 'low', 'medium', 'high'] = 'all',
+    search: str = Query(default='', max_length=64),
+    sort: Literal['newest', 'highest_risk'] = 'highest_risk',
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100_000),
+    db: Session = Depends(get_db),
+):
+    # The queue starts with suspicious transactions, but resolved and actively
+    # investigated cases remain visible. Filtering is server-side and bounded.
+    filters = [or_(Transaction.risk_level.in_(['medium', 'high']),
+                   Transaction.review_state != 'pending')]
+    if status != 'all':
+        filters.append(Transaction.review_state == status)
+    if risk_level != 'all':
+        filters.append(Transaction.risk_level == risk_level)
+    if search:
+        literal = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        term = f'%{literal}%'
+        filters.append(or_(Transaction.sender.ilike(term, escape='\\'),
+                           Transaction.recipient.ilike(term, escape='\\'),
+                           Transaction.id.ilike(term, escape='\\')))
+    total = db.scalar(select(func.count(Transaction.id)).where(*filters)) or 0
+    ordering = ((Transaction.risk_score.desc(), Transaction.created_at.desc(), Transaction.id.desc())
+                if sort == 'highest_risk' else (Transaction.created_at.desc(), Transaction.id.desc()))
+    items = list(db.scalars(select(Transaction).where(*filters).order_by(*ordering).offset(offset).limit(limit)))
+    return {'total': total, 'items': items}
+
+
+@app.get('/api/v1/investigations/{tx_id}', response_model=InvestigationDetailOut,
+         dependencies=[Depends(require_key)])
+def investigation_detail(tx_id: str, db: Session = Depends(get_db)):
+    tx = db.get(Transaction, tx_id)
+    if tx is None:
+        raise HTTPException(status_code=404, detail='Транзакция не найдена')
+    events_total = db.scalar(select(func.count(InvestigationEvent.id))
+                             .where(InvestigationEvent.transaction_id == tx_id)) or 0
+    events = list(reversed(list(db.scalars(select(InvestigationEvent)
+                                           .where(InvestigationEvent.transaction_id == tx_id)
+                                           .order_by(InvestigationEvent.created_at.desc(), InvestigationEvent.id.desc())
+                                           .limit(500)))))
+    accounts = (tx.sender, tx.recipient)
+    related = list(db.scalars(select(Transaction)
+                              .where(Transaction.id != tx_id,
+                                     or_(Transaction.sender.in_(accounts),
+                                         Transaction.recipient.in_(accounts)))
+                              .order_by(Transaction.created_at.desc(), Transaction.id.desc())
+                              .limit(50)))
+    return {'transaction': tx, 'events': events, 'events_total': events_total,
+            'related_transactions': related}
+
+
+@app.post('/api/v1/investigations/{tx_id}/comments', response_model=InvestigationEventOut,
+          dependencies=[Depends(require_key)])
+def add_investigation_comment(tx_id: str, payload: CommentIn, db: Session = Depends(get_db)):
+    tx = db.get(Transaction, tx_id)
+    if tx is None:
+        raise HTTPException(status_code=404, detail='Транзакция не найдена')
+    event = InvestigationEvent(transaction_id=tx.id, action='comment',
+                               from_state=tx.review_state, to_state=tx.review_state,
+                               comment=payload.comment)
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
 
 @app.get('/api/v1/metrics', dependencies=[Depends(require_key)])
 def metrics(db: Session = Depends(get_db)):
