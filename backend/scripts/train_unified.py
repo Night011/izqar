@@ -85,12 +85,19 @@ def ieee(data_dir, cap):
     tx = pd.read_csv(data_dir / 'train_transaction.csv', usecols=['TransactionID','TransactionDT','TransactionAmt','card1','card2','card3','card5','addr1','dist1','ProductCD','card4','card6','P_emaildomain','isFraud'], low_memory=False)
     tx = tx.sort_values(['TransactionDT','TransactionID'], kind='stable').reset_index(drop=True)
     first, second = tx.TransactionDT.iloc[int(.70 * len(tx))], tx.TransactionDT.iloc[int(.85 * len(tx))]
+    identity_path = data_dir / 'train_identity.csv'
+    if not identity_path.is_file():
+        raise FileNotFoundError('Unified IEEE adapter requires train_identity.csv alongside train_transaction.csv')
+    identity = pd.read_csv(identity_path, usecols=lambda name: name in {'TransactionID', 'DeviceType', 'DeviceInfo', 'id_31'}, low_memory=False)
+    if identity.TransactionID.isna().any() or not identity.TransactionID.is_unique:
+        raise ValueError('IEEE identity TransactionID must be unique and complete')
+    tx = tx.merge(identity, on='TransactionID', how='left', validate='one_to_one')
     fields_num = ['TransactionAmt','card1','card2','card3','card5','addr1','dist1']
-    fields_cat = ['ProductCD','card4','card6','P_emaildomain']
+    fields_cat = ['ProductCD','card4','card6','P_emaildomain','DeviceType','DeviceInfo','id_31']
     fields = fields_num + fields_cat
     train, valid = tx[tx.TransactionDT < first], tx[(tx.TransactionDT >= first) & (tx.TransactionDT < second)]
     return (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields_cat, fields_num,
-            {'method':'70/15/15 chronological TransactionDT; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','TransactionID','TransactionDT']})
+            {'method':'70/15/15 chronological TransactionDT; identity left-joined one_to_one; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','TransactionID','TransactionDT']})
 
 
 def baf(path, cap):
@@ -146,6 +153,8 @@ def main():
     for name in TASKS:
         xtr, ytr, xva, yva, cats, nums, audit = sources[name]()
         xtr, ytr = balanced_cap(xtr, ytr, args.max_train_rows); xva, yva = balanced_cap(xva, yva, args.max_validation_rows)
+        if len(np.unique(ytr)) != 2 or len(np.unique(yva)) != 2:
+            raise ValueError(f'{name} selected train and validation samples must each contain both classes; increase the row limits')
         pre = transformer(nums, cats).fit(xtr)
         prepared[name] = (to_dense(pre, xtr), ytr.astype('float32'), to_dense(pre, xva), yva.astype('int8'))
         preprocessors[name] = pre; dimensions[name] = int(prepared[name][0].shape[1]); metadata[name] = {**audit, 'train_used':len(ytr), 'validation_used':len(yva), 'positive_train':int(ytr.sum()), 'feature_schema': {'all': nums + cats, 'numerical': nums, 'categorical': cats}}
