@@ -46,7 +46,7 @@ IBM AML HI-Small_Trans.csv (синтетические операции с ме�
      └─Текущие сумма, валюты, формат, время и признак одного банка
         └─Без `Is Laundering`, счетов, банковских ID и будущей истории
            └─models/ibm_aml_hi_small_v1_portable.metrics.json + preprocessing + XGBoost JSON
-              └─POST /api/v1/ibm-aml/predict (503 до установки артефакта)
+              └─POST /api/v1/ibm-aml/predict (503 при отсутствии артефакта)
 ```
 
 Значения скоров симулятора **не** подаются в IEEE-модель и наоборот.
