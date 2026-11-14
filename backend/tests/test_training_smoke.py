@@ -60,6 +60,7 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert pay_report['validation_type_slices']['CASH_OUT']['available'] is True
     assert pay_report['validation_robustness']['missing_balances_every_tenth_row']['affected_rows'] > 0
     assert pay_report['validation_robustness']['unseen_type_encoding']['cases'] == pay_report['split_counts']['validation']
+    assert pay_report['validation_temporal_drift']['numeric'][0]['feature'] in pay_report['numerical_features']
     assert pay_report['feature_importance']['top_30']
     assert all('isFraud' not in row['feature'] and 'newbalance' not in row['feature'] for row in pay_report['feature_importance']['top_30'])
     pay_experiment = tmp_path / 'experiments' / 'paysim_candidate.joblib'

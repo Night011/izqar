@@ -36,7 +36,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from train_baf import CATEGORICAL as BAF_CATS, FEATURES as BAF_FEATURES, NUMERIC as BAF_NUMS, read_base, split_months
 from train_ibm_aml import load_splits as ibm_splits, time_boundaries as ibm_boundaries, validate_file as validate_ibm
-from train_ieee import calibration_diagnostics
+from train_ieee import calibration_diagnostics, temporal_drift_diagnostics
 from app.unified_network import UnifiedNetwork
 
 TASKS = ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')
@@ -291,9 +291,10 @@ def main():
         xtr, ytr = balanced_cap(xtr, ytr, args.max_train_rows); xva, yva = balanced_cap(xva, yva, args.max_validation_rows)
         if len(np.unique(ytr)) != 2 or len(np.unique(yva)) != 2:
             raise ValueError(f'{name} selected train and validation samples must each contain both classes; increase the row limits')
+        drift = temporal_drift_diagnostics(xtr, xva, nums, cats)
         pre = transformer(nums, cats).fit(xtr)
         prepared[name] = (to_dense(pre, xtr), ytr.astype('float32'), to_dense(pre, xva), yva.astype('int8'))
-        preprocessors[name] = pre; dimensions[name] = int(prepared[name][0].shape[1]); metadata[name] = {**audit, 'train_used':len(ytr), 'validation_used':len(yva), 'positive_train':int(ytr.sum()), 'feature_schema': {'all': nums + cats, 'numerical': nums, 'categorical': cats}}
+        preprocessors[name] = pre; dimensions[name] = int(prepared[name][0].shape[1]); metadata[name] = {**audit, 'train_used':len(ytr), 'validation_used':len(yva), 'positive_train':int(ytr.sum()), 'feature_schema': {'all': nums + cats, 'numerical': nums, 'categorical': cats}, 'validation_temporal_drift': drift}
     class MTL(nn.Module):
         def __init__(self):
             super().__init__(); self.encoders = nn.ModuleDict({n:nn.Linear(dimensions[n],32) for n in TASKS}); self.shared = nn.Sequential(nn.Linear(32,32),nn.ReLU(),nn.Linear(32,16),nn.ReLU()); self.heads=nn.ModuleDict({n:nn.Linear(16,1) for n in TASKS})

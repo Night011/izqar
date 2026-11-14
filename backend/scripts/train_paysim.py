@@ -30,7 +30,7 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
-from train_ieee import calibration_diagnostics, operating_profiles, ranking_metrics
+from train_ieee import calibration_diagnostics, operating_profiles, ranking_metrics, temporal_drift_diagnostics
 
 FEATURES = ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
 NUMERIC = ['amount', 'oldbalanceOrg', 'oldbalanceDest']
@@ -267,6 +267,9 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'validation_type_slices': type_slice_metrics(valid_rows, valid_scores, threshold),
         'validation_robustness': robustness_diagnostics(pipeline, valid_rows, valid_scores, threshold, feature_set),
         'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), valid_scores),
+        'validation_temporal_drift': temporal_drift_diagnostics(
+            decision_time_features(train_rows, feature_set), decision_time_features(valid_rows, feature_set),
+            numeric, categorical),
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), valid_scores, threshold),
         'test_metrics': test_metrics,
