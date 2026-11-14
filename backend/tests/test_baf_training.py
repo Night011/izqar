@@ -12,6 +12,12 @@ from export_portable_model import export as export_portable_model  # noqa: E402
 from install_model_bundle import install as install_model_bundle  # noqa: E402
 
 
+def test_baf_weight_candidate_cannot_consume_final_holdout(tmp_path):
+    with pytest.raises(ValueError, match='validation-only'):
+        train(tmp_path / 'not-read.csv', tmp_path / 'final.joblib', mode='final',
+              positive_weight_multiplier=.75)
+
+
 def make_base(path: Path):
     n = 400
     data = {'month': [i // 50 for i in range(n)],

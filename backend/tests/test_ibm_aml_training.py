@@ -14,6 +14,12 @@ from export_portable_model import export  # noqa: E402
 from install_model_bundle import install  # noqa: E402
 
 
+def test_ibm_causal_candidate_cannot_consume_final_holdout(tmp_path):
+    with pytest.raises(ValueError, match='validation-only candidate'):
+        train(tmp_path / 'not-read.csv', tmp_path / 'final.joblib', mode='final',
+              feature_set='causal_history_v1')
+
+
 def make_csv(path: Path):
     with path.open('w', newline='', encoding='utf-8') as stream:
         writer = csv.writer(stream)
