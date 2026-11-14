@@ -62,9 +62,12 @@ def test_ibm_aml_temporal_train_export_and_schema(tmp_path, client, auth, monkey
     assert set(FEATURES).isdisjoint({'Is Laundering', 'Account', 'Account.1', 'Amount Received'})
     experiment = tmp_path / 'experiment.joblib'
     experimental = train(path, experiment, mode='experiment', n_estimators=8,
-                         max_train_rows=100, max_false_alerts_per_10000=None)
+                         max_train_rows=100, max_false_alerts_per_10000=None,
+                         early_stopping_rounds=2)
     assert experimental['test_metrics'] is None and not experiment.exists()
     assert experimental['run_mode'] == 'experiment'
+    assert experimental['xgboost_training']['early_stopping_rounds'] == 2
+    assert experimental['xgboost_training']['selection_data'] == 'validation only; final test is never passed to fit'
     assert set(experimental['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     final = tmp_path / 'final.joblib'
     report = train(path, final, mode='final', n_estimators=8,

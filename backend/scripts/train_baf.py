@@ -77,7 +77,7 @@ def split_months(data: pd.DataFrame):
 
 def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows: int | None = None,
           mode: str = 'experiment', max_false_alerts_per_10000: float | None = 100,
-          positive_weight_multiplier: float = 1.0):
+          positive_weight_multiplier: float = 1.0, early_stopping_rounds: int | None = None):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError('Output already exists; preserve earlier experiment artifacts')
     if n_estimators < 1 or mode not in {'experiment', 'final'}:
@@ -86,6 +86,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         raise ValueError('positive_weight_multiplier must be a finite positive number')
     if mode == 'final' and positive_weight_multiplier != 1.0:
         raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
+    if early_stopping_rounds is not None and early_stopping_rounds < 1:
+        raise ValueError('early_stopping_rounds must be positive when supplied')
     if max_train_rows is not None and max_train_rows < 100:
         raise ValueError('max_train_rows must be at least 100')
     data = read_base(data_path)
@@ -101,7 +103,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
                          'max_depth': 4, 'learning_rate': .06, 'feature_set': 'base_v1',
-                         'positive_weight_multiplier': positive_weight_multiplier},
+                         'positive_weight_multiplier': positive_weight_multiplier,
+                         'early_stopping_rounds': early_stopping_rounds},
     )
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True))])
     categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
@@ -113,9 +116,15 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
                           subsample=.85, colsample_bytree=.85, reg_lambda=4,
                           objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
                           scale_pos_weight=((len(y_train) - pos) / pos) * positive_weight_multiplier,
-                          random_state=42, n_jobs=min(4, os.cpu_count() or 1))
+                          random_state=42, n_jobs=min(4, os.cpu_count() or 1),
+                          early_stopping_rounds=early_stopping_rounds)
     pipeline = Pipeline([('preprocessing', preprocessing), ('model', model)])
-    pipeline.fit(train_rows[FEATURES], y_train)
+    # Fit transforms on earlier months only.  The penultimate month is used
+    # only for optional early stopping and operating-point selection.
+    x_train_transformed = preprocessing.fit_transform(train_rows[FEATURES])
+    x_valid_transformed = preprocessing.transform(validation_rows[FEATURES])
+    model.fit(x_train_transformed, y_train,
+              eval_set=[(x_valid_transformed, validation_rows.fraud_bool.astype('int8'))], verbose=False)
     baseline_pre = ColumnTransformer([
         ('numeric', Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True)),
                               ('scale', StandardScaler(with_mean=False))]), NUMERIC),
@@ -130,7 +139,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         baseline.fit(train_rows[FEATURES], y_train)
     if baseline.named_steps['model'].n_iter_[0] >= 500:
         raise RuntimeError('BAF baseline failed to converge')
-    valid_scores = pipeline.predict_proba(validation_rows[FEATURES])[:, 1]
+    valid_scores = model.predict_proba(x_valid_transformed)[:, 1]
     threshold, threshold_report = threshold_analysis(validation_rows.fraud_bool, valid_scores,
                                                     max_false_alerts_per_10000)
     valid_metrics = metrics(validation_rows.fraud_bool, valid_scores, threshold)
@@ -158,6 +167,9 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         'validation_metrics': valid_metrics, 'test_metrics': None, 'baseline_test_metrics': None,
         'baseline_convergence': {'solver': 'liblinear',
                                  'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 500},
+        'xgboost_training': {'early_stopping_rounds': early_stopping_rounds,
+                             'best_iteration': getattr(model, 'best_iteration', None),
+                             'selection_data': 'validation month only; final test is never passed to fit'},
         'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)}
                                            for name, value in importance[:30]],
                                'leakage_audit': 'Only the explicit application-time whitelist is used; temporal availability still requires domain confirmation.'},
@@ -189,9 +201,12 @@ def main():
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100)
     parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
                         help='Experiment-only multiplier over inverse-prevalence class weight')
+    parser.add_argument('--early-stopping-rounds', type=int,
+                        help='Stop after this many non-improving validation PR-AUC rounds')
     args = parser.parse_args()
     train(args.data, args.output, args.estimators, args.max_train_rows, args.mode,
-          args.max_false_alerts_per_10000, args.positive_weight_multiplier)
+          args.max_false_alerts_per_10000, args.positive_weight_multiplier,
+          args.early_stopping_rounds)
 
 
 if __name__ == '__main__':

@@ -238,7 +238,8 @@ def choose_threshold(y_true, scores):
 
 def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None = None,
           mode: str = 'final', max_false_alerts_per_10000: float | None = None,
-          feature_set: str = 'core', positive_weight_multiplier: float = 1.0):
+          feature_set: str = 'core', positive_weight_multiplier: float = 1.0,
+          early_stopping_rounds: int | None = None):
     if mode not in {'experiment', 'final'} or n_estimators < 1:
         raise ValueError('mode must be experiment or final; estimators must be positive')
     if feature_set not in {'core', 'extended_cv'}:
@@ -304,6 +305,8 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         raise ValueError('positive_weight_multiplier must be a finite positive number')
     if mode == 'final' and positive_weight_multiplier != 1.0:
         raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
+    if early_stopping_rounds is not None and early_stopping_rounds < 1:
+        raise ValueError('early_stopping_rounds must be positive when supplied')
     train_rows = train_pool.tail(max_rows) if max_rows is not None else train_pool
     if train_rows['isFraud'].nunique() != 2:
         raise ValueError('Selected train rows must contain both classes')
@@ -316,7 +319,8 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
                          'max_depth': 4, 'learning_rate': .065, 'feature_set': feature_set,
-                         'positive_weight_multiplier': positive_weight_multiplier},
+                         'positive_weight_multiplier': positive_weight_multiplier,
+                         'early_stopping_rounds': early_stopping_rounds},
     )
 
     transform = ColumnTransformer([
@@ -331,6 +335,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         colsample_bytree=.85, reg_lambda=3, objective='binary:logistic',
         tree_method='hist', eval_metric='aucpr', random_state=42,
         n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=float(negatives / positives) * positive_weight_multiplier,
+        early_stopping_rounds=early_stopping_rounds,
     )
     pipeline = Pipeline([('preprocessing', transform), ('model', classifier)])
     x_train, y_train = train_rows[features], train_rows['isFraud'].astype(int)
@@ -347,8 +352,14 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         baseline.fit(x_train, y_train)
     if baseline.named_steps['model'].n_iter_[0] >= 1000:
         raise RuntimeError('Baseline logistic regression did not converge')
-    pipeline.fit(x_train, y_train)
-    validation_scores = pipeline.predict_proba(valid_rows[features])[:, 1]
+    # Preprocessing is fitted only on train.  Validation participates solely in
+    # optional early stopping and threshold/model selection; final test is not
+    # transformed or passed to fit in experiment mode.
+    x_train_transformed = transform.fit_transform(x_train)
+    x_valid_transformed = transform.transform(valid_rows[features])
+    classifier.fit(x_train_transformed, y_train,
+                   eval_set=[(x_valid_transformed, valid_rows['isFraud'].astype(int))], verbose=False)
+    validation_scores = classifier.predict_proba(x_valid_transformed)[:, 1]
     threshold, analysis = threshold_analysis(valid_rows['isFraud'].astype(int), validation_scores, max_false_alerts_per_10000)
     validation_metrics = metrics(valid_rows['isFraud'].astype(int), validation_scores, threshold)
     baseline_validation_scores = baseline.predict_proba(valid_rows[features])[:, 1]
@@ -384,6 +395,9 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         'baseline_validation_metrics': baseline_validation_metrics,
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True,
                                  'numeric_preprocessing': 'train-fitted standard scaling and clipping to [-20,20]'},
+        'xgboost_training': {'early_stopping_rounds': early_stopping_rounds,
+                             'best_iteration': getattr(classifier, 'best_iteration', None),
+                             'selection_data': 'validation only; final test is never passed to fit'},
         'threshold_analysis': analysis,
         'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), validation_scores),
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), validation_scores),
@@ -420,6 +434,8 @@ def main():
                         help='Candidate extended C/V features; evaluate in experiment mode before any final use')
     parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
                         help='Experiment-only multiplier over inverse-prevalence class weight')
+    parser.add_argument('--early-stopping-rounds', type=int,
+                        help='Stop after this many non-improving validation PR-AUC rounds')
     args = parser.parse_args()
     if args.max_train_rows is not None and args.max_train_rows < 100:
         parser.error('--max-train-rows must be at least 100')
@@ -428,7 +444,8 @@ def main():
     if args.mode == 'final' and args.max_train_rows is not None:
         parser.error('Final run uses all rows in the fixed train window')
     train(args.data_dir, args.output, args.estimators, args.max_train_rows, args.mode,
-          args.max_false_alerts_per_10000, args.feature_set, args.positive_weight_multiplier)
+          args.max_false_alerts_per_10000, args.feature_set, args.positive_weight_multiplier,
+          args.early_stopping_rounds)
 
 if __name__ == '__main__':
     main()

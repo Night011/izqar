@@ -46,8 +46,11 @@ def test_baf_base_train_and_final_holdout(tmp_path, client, auth, monkeypatch):
     assert set(report['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     weighted = tmp_path / 'weighted.joblib'
     weighted_report = train(path, weighted, n_estimators=8, max_train_rows=100, mode='experiment',
-                            max_false_alerts_per_10000=None, positive_weight_multiplier=1.25)
+                            max_false_alerts_per_10000=None, positive_weight_multiplier=1.25,
+                            early_stopping_rounds=2)
     assert weighted_report['experiment']['hyperparameters']['positive_weight_multiplier'] == 1.25
+    assert weighted_report['xgboost_training']['early_stopping_rounds'] == 2
+    assert weighted_report['xgboost_training']['selection_data'] == 'validation month only; final test is never passed to fit'
     assert report['split_boundaries'] == {'train_months': [0, 1, 2, 3, 4, 5],
                                           'validation_month': 6, 'test_month': 7}
     assert set(FEATURES).isdisjoint({'fraud_bool', 'month', 'device_fraud_count', 'days_since_request'})

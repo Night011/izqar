@@ -218,7 +218,8 @@ def precision_at_k(y: np.ndarray, scores: np.ndarray, k: int = 1000) -> float:
 
 def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators: int = 180,
           max_train_rows: int | None = 500_000, max_false_alerts_per_10000: float | None = 100,
-          feature_set: str = 'static_v1', history_max_accounts: int = 500_000):
+          feature_set: str = 'static_v1', history_max_accounts: int = 500_000,
+          early_stopping_rounds: int | None = None):
     if mode not in {'experiment', 'final'} or n_estimators < 1:
         raise ValueError('Use experiment/final mode and positive estimators')
     if max_train_rows is not None and max_train_rows < 100:
@@ -227,6 +228,8 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         raise ValueError('feature_set must be static_v1 or causal_history_v1')
     if feature_set != 'static_v1' and mode == 'final':
         raise ValueError('causal history is a validation-only candidate; final mode is deliberately blocked')
+    if early_stopping_rounds is not None and early_stopping_rounds < 1:
+        raise ValueError('early_stopping_rounds must be positive when supplied')
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError('Output exists; preserve prior IBM AML experiments')
     validate_file(data_path)
@@ -243,7 +246,8 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
                          'max_depth': 4, 'learning_rate': .06, 'feature_set': feature_set,
-                         'history_max_accounts': history_max_accounts if feature_set != 'static_v1' else None},
+                         'history_max_accounts': history_max_accounts if feature_set != 'static_v1' else None,
+                         'early_stopping_rounds': early_stopping_rounds},
     )
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median'))])
     categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
@@ -254,10 +258,15 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
                           subsample=.85, colsample_bytree=.85, reg_lambda=4,
                           objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
                           scale_pos_weight=(len(y_train) - positive) / positive,
-                          random_state=42, n_jobs=min(4, os.cpu_count() or 1))
+                          random_state=42, n_jobs=min(4, os.cpu_count() or 1),
+                          early_stopping_rounds=early_stopping_rounds)
     pipeline = Pipeline([('preprocessing', pre), ('model', model)])
-    pipeline.fit(x_train, y_train)
-    valid_scores = pipeline.predict_proba(x_valid)[:, 1]
+    # Validation is never merged into account history training data.  It can
+    # only stop boosting and select the explicitly reported threshold.
+    x_train_transformed = pre.fit_transform(x_train)
+    x_valid_transformed = pre.transform(x_valid)
+    model.fit(x_train_transformed, y_train, eval_set=[(x_valid_transformed, y_valid)], verbose=False)
+    valid_scores = model.predict_proba(x_valid_transformed)[:, 1]
     threshold, curve = threshold_analysis(y_valid, valid_scores, max_false_alerts_per_10000)
     if not 0 <= threshold <= 1:
         raise ValueError('Selected threshold cannot be serialized as a model threshold')
@@ -280,6 +289,9 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         'split_counts': {**counts, 'total': total, 'train_used': len(y_train)},
         'experiment': finish_experiment(experiment, started),
         'threshold': float(threshold), 'threshold_analysis': curve,
+        'xgboost_training': {'early_stopping_rounds': early_stopping_rounds,
+                             'best_iteration': getattr(model, 'best_iteration', None),
+                             'selection_data': 'validation only; final test is never passed to fit'},
         'validation_calibration': calibration_diagnostics(y_valid, valid_scores),
         'validation_ranking_metrics': ranking_metrics(y_valid, valid_scores),
         'validation_operating_profiles': operating_profiles(y_valid, valid_scores, threshold),
@@ -334,10 +346,12 @@ def main() -> None:
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100)
     parser.add_argument('--feature-set', choices=['static_v1', 'causal_history_v1'], default='static_v1')
     parser.add_argument('--history-max-accounts', type=int, default=500_000)
+    parser.add_argument('--early-stopping-rounds', type=int,
+                        help='Stop after this many non-improving validation PR-AUC rounds')
     args = parser.parse_args()
     train(args.data, args.output, args.mode, args.estimators,
           None if args.full_train else args.max_train_rows, args.max_false_alerts_per_10000,
-          args.feature_set, args.history_max_accounts)
+          args.feature_set, args.history_max_accounts, args.early_stopping_rounds)
 
 
 if __name__ == '__main__':
