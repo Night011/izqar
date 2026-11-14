@@ -80,6 +80,12 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 Импортёр проверяет лимит размера, плоскую структуру ZIP, pinned SHA ревизии и отсутствие final test; он не десериализует модели. На одинаковом validation окне candidate дал PR-AUC `0.099919` против `0.031192`, Recall `0.592105` против `0.361842` и F1 `0.102424` против `0.064050` при 99.489 против 99.161 FP/10k. Это достаточное основание для дальнейшего controlled validation research, но не для использования уже просмотренного final test, automatic promotion или замены active-артефакта.
 
+### IBM AML causal-history full early-train candidate
+
+Полный ранний train-period run завершён как Kaggle kernel `hoogle57/izqar-ibm-causal-fulltrain-candidate-v1` на commit `0d4c222d4d97d677f514e841ae40968e67046156`. Он использовал `causal_history_v1`, 3 554 649 ранних train операций, следующие 761 593 validation операций и не запускал последние 762 103 final-test операций. ZIP `izqar_ibm_causal_fulltrain_candidate_report.zip` прошёл CRC/ZIP integrity и имеет SHA-256 `6906b4196e38ed905cdf84a0c6ac114edd3fe15a51bbd245eaec43616c7d6549`; он уже импортирован report-only через тот же importer.
+
+На validation при лимите 100 FP/10k: PR-AUC `0.120583`, ROC-AUC `0.978720`, Precision `0.063157`, Recall `0.664474`, F1 `0.115349`, FP `7 491`, FN `255`, 98.360 FP/10k и Precision@1000 `0.179`. Score не является калиброванной вероятностью. Это лучший IBM validation candidate на текущем фиксированном окне, но он не является основанием для automatic promotion: прежде чем делать ровно одну final evaluation, надо явно зафиксировать конфигурацию и не менять её по старому final test.
+
 ## Локальные проверки и запуск
 
 ```powershell
