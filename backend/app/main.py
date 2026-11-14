@@ -28,10 +28,6 @@ from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_mode
 MAX_API_BODY_BYTES = 64 * 1024
 
 
-class _ApiBodyTooLarge(Exception):
-    """Internal ASGI signal converted to a 413 before endpoint code runs."""
-
-
 class ApiBodyLimitMiddleware:
     """Bound request bytes even when a client omits or lies about Content-Length."""
 
@@ -57,30 +53,31 @@ class ApiBodyLimitMiddleware:
                 await JSONResponse(status_code=413, content={'detail': f'Request body exceeds {self.max_body_bytes} byte limit'})(scope, receive, send)
                 return
         received = 0
-        response_started = False
-
-        async def limited_receive():
-            nonlocal received
+        chunks = []
+        while True:
             message = await receive()
-            if message['type'] == 'http.request':
-                received += len(message.get('body', b''))
-                if received > self.max_body_bytes:
-                    raise _ApiBodyTooLarge
-            return message
-
-        async def tracked_send(message):
-            nonlocal response_started
-            if message['type'] == 'http.response.start':
-                response_started = True
-            await send(message)
-
-        try:
-            await self.app(scope, limited_receive, tracked_send)
-        except _ApiBodyTooLarge:
-            # Body parsing precedes endpoint output. Keep the guard for future
-            # streaming endpoints, which must not produce a second response.
-            if not response_started:
+            if message['type'] == 'http.disconnect':
+                return
+            if message['type'] != 'http.request':
+                continue
+            chunk = message.get('body', b'')
+            received += len(chunk)
+            if received > self.max_body_bytes:
                 await JSONResponse(status_code=413, content={'detail': f'Request body exceeds {self.max_body_bytes} byte limit'})(scope, receive, send)
+                return
+            chunks.append(chunk)
+            if not message.get('more_body', False):
+                break
+
+        async def replay_receive():
+            if chunks:
+                body = chunks.pop(0)
+                return {'type': 'http.request', 'body': body, 'more_body': bool(chunks)}
+            return {'type': 'http.disconnect'}
+
+        # The body is bounded before FastAPI gets a receive callable, so its
+        # JSON parser cannot convert an over-limit transport error into 400.
+        await self.app(scope, replay_receive, send)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

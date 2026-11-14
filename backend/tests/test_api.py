@@ -109,6 +109,35 @@ def test_api_body_limiter_counts_chunked_bytes_without_content_length():
     assert sent[0]['status'] == 413
 
 
+def test_chunked_overlimit_request_returns_cors_enabled_413_from_full_app():
+    """Exercise the installed middleware order, not just the limiter in isolation."""
+    from app.main import app
+
+    chunks = iter([
+        {'type': 'http.request', 'body': b'a' * 40_000, 'more_body': True},
+        {'type': 'http.request', 'body': b'b' * 30_000, 'more_body': False},
+    ])
+    sent = []
+
+    async def receive():
+        return next(chunks)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1', 'method': 'POST',
+        'scheme': 'http', 'path': '/api/v1/transfers', 'raw_path': b'/api/v1/transfers',
+        'query_string': b'', 'root_path': '', 'client': ('testclient', 50000), 'server': ('testserver', 80),
+        'headers': [(b'origin', b'http://localhost:5173')],
+    }
+    asyncio.run(app(scope, receive, send))
+    start = next(message for message in sent if message['type'] == 'http.response.start')
+    headers = dict(start['headers'])
+    assert start['status'] == 413
+    assert headers[b'access-control-allow-origin'] == b'http://localhost:5173'
+
+
 def test_autonomous_demo_page(client):
     response = client.get('/demo/')
     assert response.status_code == 200
