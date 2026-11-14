@@ -27,7 +27,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
-from train_ieee import file_provenance, metrics, threshold_analysis
+from experiment_tracking import finish_experiment, start_experiment
+from train_ieee import file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
 
 EXPECTED_HEADER = [
     'Timestamp', 'From Bank', 'Account', 'To Bank', 'Account',
@@ -171,6 +172,13 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
                                 max_train_rows, mode == 'final')
     x_train, y_train = split['train']
     x_valid, y_valid = split['validation']
+    experiment, started = start_experiment(
+        dataset='IBM AML HI-Small', algorithm='XGBoost', features=FEATURES,
+        split_method='timestamp 70/15/15; final test omitted in experiment mode', mode=mode,
+        hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
+                         'max_false_alerts_per_10000': max_false_alerts_per_10000,
+                         'max_depth': 4, 'learning_rate': .06, 'feature_set': 'static_v1'},
+    )
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median'))])
     categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
                             ('onehot', OneHotEncoder(handle_unknown='ignore'))])
@@ -204,7 +212,10 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         'split_method': 'timestamps below 70th percentile train, next 15% validation, last 15% final test; ties remain in later period',
         'split_boundaries': {'validation_start': train_cut.isoformat(), 'test_start': valid_cut.isoformat()},
         'split_counts': {**counts, 'total': total, 'train_used': len(y_train)},
+        'experiment': finish_experiment(experiment, started),
         'threshold': float(threshold), 'threshold_analysis': curve,
+        'validation_ranking_metrics': ranking_metrics(y_valid, valid_scores),
+        'validation_operating_profiles': operating_profiles(y_valid, valid_scores, threshold),
         'validation_metrics': validation_metrics, 'test_metrics': None, 'baseline_test_metrics': None,
         'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)}
                                            for name, value in importance[:30]],

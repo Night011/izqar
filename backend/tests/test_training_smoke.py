@@ -37,8 +37,16 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert pay_report['test_metrics']['cases'] == 45
     assert 'isFraud' not in pay_report['features']
     assert pay_report['baseline_convergence']['converged'] is True
+    assert set(pay_report['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
+    assert {'100', '500', '1000'} <= set(pay_report['validation_ranking_metrics'])
     assert pay_report['feature_importance']['top_30']
     assert all('isFraud' not in row['feature'] and 'newbalance' not in row['feature'] for row in pay_report['feature_importance']['top_30'])
+    pay_experiment = tmp_path / 'experiments' / 'paysim_candidate.joblib'
+    train_paysim(paysim_path, pay_experiment, n_estimators=8, max_rows=None, mode='experiment')
+    pay_experiment_report = json.loads(pay_experiment.with_suffix('.metrics.json').read_text(encoding='utf-8'))
+    assert not pay_experiment.exists()
+    assert pay_experiment_report['test_metrics'] is None
+    assert pay_experiment_report['baseline_test_metrics'] is None
     with pytest.raises(FileExistsError, match='Output already exists'):
         train_paysim(paysim_path, pay_model, 8, None)
     pay_audit = audit_paysim_validation(paysim_path, pay_model, pay_model.with_name(pay_model.stem + '.validation_audit.json'))
@@ -67,6 +75,7 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert ieee_report['baseline_convergence']['solver'] == 'liblinear'
     assert ieee_report['baseline_convergence']['iterations'] < ieee_report['baseline_convergence']['max_iter']
     assert ieee_report['feature_importance']['leakage_audit']
+    assert set(ieee_report['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     experiment_model = tmp_path / 'experiments' / 'ieee_100.joblib'
     train_ieee(ieee_dir, experiment_model, n_estimators=8, max_rows=100, mode='experiment')
     experiment_report = json.loads(experiment_model.with_suffix('.metrics.json').read_text(encoding='utf-8'))

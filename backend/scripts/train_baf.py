@@ -26,7 +26,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
-from train_ieee import file_provenance, metrics, threshold_analysis
+from experiment_tracking import finish_experiment, start_experiment
+from train_ieee import file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
 
 NUMERIC = [
     'income', 'name_email_similarity', 'prev_address_months_count',
@@ -89,6 +90,13 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         train_rows = train_rows.iloc[:max_train_rows]
     if train_rows.fraud_bool.nunique() != 2:
         raise ValueError('Selected training rows must contain both classes')
+    experiment, started = start_experiment(
+        dataset='Feedzai BAF Base', algorithm='XGBoost', features=FEATURES,
+        split_method='month train/validation/final-test; final test omitted in experiment mode', mode=mode,
+        hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
+                         'max_false_alerts_per_10000': max_false_alerts_per_10000,
+                         'max_depth': 4, 'learning_rate': .06, 'feature_set': 'base_v1'},
+    )
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True))])
     categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
                             ('onehot', OneHotEncoder(handle_unknown='ignore', max_categories=20))])
@@ -136,7 +144,10 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         'split_boundaries': boundaries,
         'split_counts': {'train_available': original_train_count, 'train_used': len(train_rows),
                          'validation': len(validation_rows), 'test': len(test_rows)},
+        'experiment': finish_experiment(experiment, started),
         'threshold': float(threshold), 'threshold_analysis': threshold_report,
+        'validation_ranking_metrics': ranking_metrics(validation_rows.fraud_bool, valid_scores),
+        'validation_operating_profiles': operating_profiles(validation_rows.fraud_bool, valid_scores, threshold),
         'validation_metrics': valid_metrics, 'test_metrics': None, 'baseline_test_metrics': None,
         'baseline_convergence': {'solver': 'liblinear',
                                  'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 500},

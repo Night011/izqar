@@ -29,6 +29,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
+from experiment_tracking import finish_experiment, start_experiment
+from train_ieee import operating_profiles, ranking_metrics
+
 FEATURES = ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
 NUMERIC = ['amount', 'oldbalanceOrg', 'oldbalanceDest']
 CATEGORICAL = ['type']
@@ -81,11 +84,13 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
 
 
 def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None,
-          model_version: str = 'paysim-xgboost-v1'):
+          model_version: str = 'paysim-xgboost-v1', mode: str = 'final'):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
     if not model_version.startswith('paysim-xgboost-v') or not model_version.removeprefix('paysim-xgboost-v').isdigit():
         raise ValueError('model_version must have the form paysim-xgboost-vN')
+    if mode not in {'experiment', 'final'}:
+        raise ValueError('mode must be experiment or final')
     if not data_path.is_file():
         raise FileNotFoundError(f'Missing {data_path}. Download PaySim manually from Kaggle and keep it outside Git.')
     data = read_paysim(data_path, max_rows)
@@ -96,6 +101,12 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     for label, part in [('train', train_rows), ('validation', valid_rows), ('test', test_rows)]:
         if part.empty or part['isFraud'].nunique() != 2:
             raise ValueError(f'{label} split must contain both classes. Increase --max-rows or use the full chronology.')
+    experiment, started = start_experiment(
+        dataset='PaySim', algorithm='XGBoost', features=FEATURES,
+        split_method='chronological step 70/15/15; final test omitted in experiment mode', mode=mode,
+        hyperparameters={'n_estimators': n_estimators, 'max_rows': max_rows, 'max_depth': 4,
+                         'learning_rate': .065, 'feature_set': 'pre_transaction_v1'},
+    )
     transform = ColumnTransformer([
         ('numeric', SimpleImputer(strategy='median', add_indicator=True), NUMERIC),
         ('category', OneHotEncoder(handle_unknown='ignore'), CATEGORICAL),
@@ -125,17 +136,25 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     ranked = sorted(zip(encoded_features, importances), key=lambda item: item[1], reverse=True)
     valid_scores = pipeline.predict_proba(valid_rows[FEATURES])[:, 1]
     threshold = choose_threshold(valid_rows['isFraud'].astype(int), valid_scores)
-    test_scores = pipeline.predict_proba(test_rows[FEATURES])[:, 1]
+    test_metrics = None
+    baseline_test_metrics = None
+    if mode == 'final':
+        test_scores = pipeline.predict_proba(test_rows[FEATURES])[:, 1]
+        test_metrics = evaluate(test_rows['isFraud'].astype(int), test_scores, threshold)
+        baseline_test_metrics = evaluate(test_rows['isFraud'].astype(int), baseline.predict_proba(test_rows[FEATURES])[:, 1], .5)
     artifact = {
         'format_version': 2, 'model_kind': 'paysim', 'model_version': model_version,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(), 'dataset': 'PaySim (synthetic Kaggle dataset)',
         'data_files': [file_provenance(data_path)],
         'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
         'split_counts': {'train': len(train_rows), 'validation': len(valid_rows), 'test': len(test_rows)},
+        'experiment': finish_experiment(experiment, started),
         'features': FEATURES, 'numerical_features': NUMERIC, 'categorical_features': CATEGORICAL, 'pipeline': pipeline,
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
-        'test_metrics': evaluate(test_rows['isFraud'].astype(int), test_scores, threshold),
-        'baseline_test_metrics': evaluate(test_rows['isFraud'].astype(int), baseline.predict_proba(test_rows[FEATURES])[:, 1], .5),
+        'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), valid_scores),
+        'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), valid_scores, threshold),
+        'test_metrics': test_metrics,
+        'baseline_test_metrics': baseline_test_metrics,
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True},
         'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)} for name, value in ranked[:30]],
                                'leakage_audit': 'Encoded features derive only from type, amount, oldbalanceOrg and oldbalanceDest; importance does not establish causality.'},
@@ -144,13 +163,16 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'warning': 'PaySim is synthetic; output is an uncalibrated research-model score, not a banking fraud probability.',
     }
     output.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(artifact, output, compress=3)
+    if mode == 'final':
+        joblib.dump(artifact, output, compress=3)
     report = {key: value for key, value in artifact.items() if key != 'pipeline'}
     report['threshold'] = round(float(threshold), 6)
     report_path = output.with_suffix('.metrics.json')
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps({'model_path': str(output), 'metrics_path': str(report_path), 'validation': artifact['validation_metrics'], 'test': artifact['test_metrics']}, ensure_ascii=False, indent=2))
-    print('IMPORTANT: isFraud was used only as y; the held-out test set was evaluated once after validation threshold selection.')
+    print(json.dumps({'model_path': str(output) if mode == 'final' else None, 'metrics_path': str(report_path),
+                      'validation': artifact['validation_metrics'], 'test': artifact['test_metrics']}, ensure_ascii=False, indent=2))
+    if mode == 'final':
+        print('IMPORTANT: isFraud was used only as y; the held-out test set was evaluated once after validation threshold selection.')
 
 
 def main():
@@ -160,11 +182,14 @@ def main():
     parser.add_argument('--estimators', type=int, default=180)
     parser.add_argument('--max-rows', type=int, default=500_000, help='Default memory cap: 500000 chronological CSV rows')
     parser.add_argument('--full-data', action='store_true', help='Explicitly opt into loading the entire CSV in RAM')
+    parser.add_argument('--mode', choices=['experiment', 'final'], default='experiment',
+                        help='Experiment mode omits the held-out test and writes metrics only')
     parser.add_argument('--model-version', default='paysim-xgboost-v1', help='Version identifier saved with the artifact')
     args = parser.parse_args()
     if args.max_rows is not None and args.max_rows < 100:
         parser.error('--max-rows must be at least 100')
-    train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows, args.model_version)
+    train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows,
+          args.model_version, args.mode)
 
 
 if __name__ == '__main__':

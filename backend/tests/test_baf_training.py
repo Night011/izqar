@@ -36,6 +36,7 @@ def test_baf_base_train_and_final_holdout(tmp_path, client, auth, monkeypatch):
                    max_false_alerts_per_10000=None)
     assert not experiment.exists()
     assert report['test_metrics'] is None
+    assert set(report['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     assert report['split_boundaries'] == {'train_months': [0, 1, 2, 3, 4, 5],
                                           'validation_month': 6, 'test_month': 7}
     assert set(FEATURES).isdisjoint({'fraud_bool', 'month', 'device_fraud_count', 'days_since_request'})

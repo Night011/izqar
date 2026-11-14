@@ -27,6 +27,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
+from experiment_tracking import finish_experiment, start_experiment
+
 NUMERIC = [
     'TransactionAmt', 'card1', 'card2', 'card3', 'card5', 'addr1', 'addr2',
     'dist1', 'dist2', 'C1', 'C2', 'C4', 'C6', 'C7', 'C8', 'C9', 'C10',
@@ -96,6 +98,75 @@ def threshold_analysis(y_true, scores, max_false_alerts_per_10000: float | None 
     return selected, {'max_f1_threshold': best_f1, 'selected_threshold': selected,
                       'strategy': 'false_alert_budget' if max_false_alerts_per_10000 is not None else 'max_f1',
                       'max_false_alerts_per_10000': max_false_alerts_per_10000, 'curve': curve}
+
+
+def ranking_metrics(y_true, scores, ks: tuple[int, ...] = (100, 500, 1000)) -> dict:
+    """Ranking quality for a bounded investigation queue; no threshold tuning."""
+    y, values = np.asarray(y_true, dtype=np.int8), np.asarray(scores, dtype=float)
+    if len(y) != len(values) or not len(y) or not np.isfinite(values).all():
+        raise ValueError('ranking metrics need equally sized finite labels and scores')
+    total_positive = int(y.sum())
+    order = np.argsort(-values, kind='stable')
+    results = {}
+    for requested in ks:
+        if requested < 1:
+            raise ValueError('ranking cutoffs must be positive')
+        actual = min(int(requested), len(y))
+        found = int(y[order[:actual]].sum())
+        results[str(requested)] = {
+            'alerts': actual,
+            'precision_at_k': round(found / actual, 6),
+            'recall_at_k': round(found / max(total_positive, 1), 6),
+            'true_positives_at_k': found,
+        }
+    return results
+
+
+def operating_profiles(y_true, scores, analyst_threshold: float,
+                       monitoring_min_recall: float = .80,
+                       high_confidence_min_precision: float = .80) -> dict:
+    """Choose three named operating points from validation only.
+
+    A PR curve is sampled instead of evaluating every unique threshold, keeping
+    memory and CPU bounded on the large IEEE/IBM validation windows.  Profiles
+    that cannot meet their constraint are reported as unavailable rather than
+    silently returning an attractive but invalid operating point.
+    """
+    if not 0 <= analyst_threshold <= 1 or not 0 < monitoring_min_recall <= 1 or not 0 < high_confidence_min_precision <= 1:
+        raise ValueError('invalid operating-profile constraint')
+    y, values = np.asarray(y_true, dtype=np.int8), np.asarray(scores, dtype=float)
+    if len(y) != len(values) or not len(y) or not np.isfinite(values).all():
+        raise ValueError('operating profiles need equally sized finite labels and scores')
+    precision, recall, thresholds = precision_recall_curve(y, values)
+    candidate_precision, candidate_recall = precision[:-1], recall[:-1]
+    if not len(thresholds):
+        raise ValueError('operating profiles need score variation')
+
+    def materialize(index: int, constraint: str, met: bool) -> dict:
+        threshold = float(thresholds[index])
+        return {'threshold': round(threshold, 6), 'constraint': constraint,
+                'constraint_met': met, 'metrics': metrics(y, values, threshold)}
+
+    profiles = {'analyst_review': materialize(int(np.argmin(np.abs(thresholds - analyst_threshold))),
+                                               'validation-selected review threshold', True)}
+    monitoring = np.flatnonzero(candidate_recall >= monitoring_min_recall)
+    if len(monitoring):
+        # Largest feasible threshold minimises review load while retaining the target recall.
+        profiles['monitoring'] = materialize(int(monitoring[-1]), f'recall >= {monitoring_min_recall:.2f}', True)
+    else:
+        best = int(np.argmax(candidate_recall))
+        profiles['monitoring'] = materialize(best, f'recall >= {monitoring_min_recall:.2f}', False)
+
+    confident = np.flatnonzero(candidate_precision >= high_confidence_min_precision)
+    if len(confident):
+        best_recall = candidate_recall[confident].max()
+        best = int(confident[np.flatnonzero(candidate_recall[confident] == best_recall)[-1]])
+        profiles['high_confidence'] = materialize(best, f'precision >= {high_confidence_min_precision:.2f}', True)
+    else:
+        profiles['high_confidence'] = {'available': False,
+                                       'constraint': f'precision >= {high_confidence_min_precision:.2f}',
+                                       'reason': 'No validation threshold meets this precision constraint.'}
+    return profiles
 
 
 def feature_importance(pipeline: Pipeline, features: list[str]) -> dict:
@@ -213,6 +284,13 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
     if FORBIDDEN.intersection(features):
         raise ValueError('Forbidden target, identifier, or split column in features')
     del data
+    experiment, started = start_experiment(
+        dataset='IEEE-CIS', algorithm='XGBoost', features=features,
+        split_method='chronological TransactionDT 70/15/15; final test omitted in experiment mode', mode=mode,
+        hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_rows,
+                         'max_false_alerts_per_10000': max_false_alerts_per_10000,
+                         'max_depth': 4, 'learning_rate': .065, 'feature_set': feature_set},
+    )
 
     transform = ColumnTransformer([
         ('numeric', SimpleImputer(strategy='median', add_indicator=True), nums),
@@ -269,6 +347,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
         'split_counts': {'train_pool': len(train_pool), 'train_used': len(train_rows), 'validation': len(valid_rows), 'final_test': len(test_rows)},
         'split_boundaries': split_boundaries,
+        'experiment': finish_experiment(experiment, started),
         'pipeline': pipeline,
         'features': features,
         'numerical_features': nums,
@@ -279,6 +358,8 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True,
                                  'numeric_preprocessing': 'train-fitted standard scaling and clipping to [-20,20]'},
         'threshold_analysis': analysis,
+        'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), validation_scores),
+        'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), validation_scores, threshold),
         'feature_importance': importance,
         'test_metrics': test_metrics,
         'baseline_test_metrics': baseline_test_metrics,

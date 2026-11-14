@@ -38,6 +38,7 @@ def test_ibm_aml_temporal_train_export_and_schema(tmp_path, client, auth, monkey
     experimental = train(path, experiment, mode='experiment', n_estimators=8,
                          max_train_rows=100, max_false_alerts_per_10000=None)
     assert experimental['test_metrics'] is None and not experiment.exists()
+    assert set(experimental['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     final = tmp_path / 'final.joblib'
     report = train(path, final, mode='final', n_estimators=8,
                    max_train_rows=100, max_false_alerts_per_10000=None)

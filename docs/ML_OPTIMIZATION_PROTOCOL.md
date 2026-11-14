@@ -1,0 +1,55 @@
+# Протокол оптимизации ML-моделей IZQAR
+
+Этот документ задаёт порядок validation-only исследований. Он не объявляет новые метрики и не разрешает повторно подбирать параметры по ранее просмотренным specialist test-наборам.
+
+## Неподвижные правила
+
+1. Активные PaySim, IEEE-CIS, BAF Base и IBM AML артефакты остаются baseline.
+2. Каждый candidate запускается в режиме `experiment`: финальный test не рассчитывается и модель не становится active.
+3. Признаки, preprocessing, threshold и алгоритм выбираются только по ранним временным train/validation-окнам.
+4. Одинаковые candidate сравниваются с baseline на одинаковой validation-выборке. Улучшение только одной цифры не считается победой без проверки нагрузки очереди и устойчивости по времени.
+5. Новый candidate может получить отдельный portable ZIP лишь после заранее зафиксированного критерия. До независимой оценки он остаётся shadow/experiment.
+
+## Что сохраняет каждый новый отчёт
+
+Тренеры PaySim, IEEE-CIS, BAF Base и IBM AML сохраняют `experiment` с ID, код-ревизией, схемой признаков, split, параметрами, временем и доступным high-water RSS. Также есть:
+
+- `validation_ranking_metrics`: Precision@100/500/1000 и Recall@K;
+- `validation_operating_profiles`:
+  - **monitoring** — максимальный threshold, удерживающий validation Recall ≥ 80%, либо честная пометка, что условие недостижимо;
+  - **analyst_review** — validation-selected operating point;
+  - **high_confidence** — максимальный Recall при Precision ≥ 80%, либо честная недоступность;
+- полный `threshold_analysis`, feature importance и предупреждения о применимости.
+
+Профили не являются банковскими policy: 80% — явная исследовательская настройка для сравнения, а не готовое правило блокировки.
+
+## Приоритеты исследований
+
+| Направление | Validation-only критерий | Первые безопасные эксперименты |
+|---|---|---|
+| IBM AML | Precision/PR-AUC и alerts/10k при сохранении Recall, Precision@K | score distribution, payment-format/currency/time slices, causальные account-history/graph признаки без ID в модели, reranking для review queue |
+| BAF | Recall и PR-AUC при контроле FP | class weighting, разрешённые признаки заявки, month drift, CatBoost/LightGBM candidate на неизменном split |
+| IEEE-CIS | Recall при заранее заданном FP budget | C/D/V/identity availability audit, missingness, time slices, candidate preprocessing |
+| PaySim | Recall по `TRANSFER`/`CASH_OUT` и устойчивость | validation error slices, безопасные pre-transaction balance features, unknown category stress |
+| Unified MTL | PR-AUC/F1 по каждой task без отрицательного transfer | task/class balancing, shared-width, adapters/heads, gradient-interference audit, early stopping |
+
+## Команды безопасных experiments
+
+Все команды требуют исходные данные из разрешённого Kaggle Input и сохраняют отчёт в игнорируемом `backend/models/experiments/`.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe scripts\train_paysim.py --data <PaySim.csv> --mode experiment --max-rows 500000 --output models\experiments\paysim_candidate_01.joblib
+.\.venv\Scripts\python.exe scripts\train_ieee.py --data-dir <ieee-dir> --mode experiment --feature-set extended_cv --max-train-rows 300000 --output models\experiments\ieee_candidate_01.joblib
+.\.venv\Scripts\python.exe scripts\train_baf.py --data <Base.csv> --mode experiment --max-train-rows 500000 --output models\experiments\baf_candidate_01.joblib --max-false-alerts-per-10000 100
+.\.venv\Scripts\python.exe scripts\train_ibm_aml.py --data <HI-Small_Trans.csv> --mode experiment --max-train-rows 500000 --output models\experiments\ibm_candidate_01.joblib --max-false-alerts-per-10000 100
+```
+
+Не запускайте `--mode final` для настройки этих старых holdout. Для Unified остаётся отдельная sealed one-time final процедура из [NEXT_STEPS.md](NEXT_STEPS.md).
+
+## Интерпретация результатов
+
+- **Monitoring** подходит для исследования покрытия; он не означает автоматическую блокировку.
+- **Analyst Review** оценивает компромисс false alerts/Recall и размер очереди.
+- **High Confidence** не является доказательством мошенничества и может честно отсутствовать, если validation не достигает нужного Precision.
+- Периодные, категориальные и графовые срезы — диагностика. Они не дают права менять candidate после просмотра закрытого test.

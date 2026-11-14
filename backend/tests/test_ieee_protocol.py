@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_ieee import split_chronologically, threshold_analysis, train
+from train_ieee import operating_profiles, ranking_metrics, split_chronologically, threshold_analysis, train
 
 
 def test_final_holdout_is_fixed_when_training_size_changes():
@@ -39,6 +39,21 @@ def test_false_alert_budget_uses_exact_validation_counts():
     assert f1_threshold <= .9
     with pytest.raises(ValueError, match='nonnegative'):
         threshold_analysis(labels, scores, max_false_alerts_per_10000=-1)
+
+
+def test_validation_profiles_and_ranking_keep_constraints_explicit():
+    labels = np.array([1, 0, 1, 0, 0, 1], dtype=np.int8)
+    scores = np.array([.80, .95, .70, .40, .20, .10])
+    profiles = operating_profiles(labels, scores, .70, monitoring_min_recall=.8,
+                                  high_confidence_min_precision=.99)
+    ranking = ranking_metrics(labels, scores, ks=(2, 10))
+    assert profiles['analyst_review']['metrics']['cases'] == 6
+    assert profiles['monitoring']['constraint_met'] is True
+    assert profiles['monitoring']['metrics']['recall'] >= .8
+    assert profiles['high_confidence']['available'] is False
+    assert ranking['2'] == {'alerts': 2, 'precision_at_k': .5, 'recall_at_k': .333333,
+                            'true_positives_at_k': 1}
+    assert ranking['10']['alerts'] == 6
 
 
 def test_existing_report_is_not_overwritten(tmp_path):

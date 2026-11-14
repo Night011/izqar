@@ -53,6 +53,10 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 После проверки перенесите JSON в `backend/models/experiments/ibm_graph_report.json` (этот каталог исключён из Git) либо задайте `IZQAR_IBM_AML_GRAPH_REPORT_PATH`. Перезапустите API: вкладка **Граф связей** получит только число строк, рёбер и структурных сигналов. Идентификаторы и сами цепочки API намеренно не возвращает.
 
+## Новые validation-only ML experiments
+
+До новых data artifacts используйте [протокол оптимизации](ML_OPTIMIZATION_PROTOCOL.md). В нём фиксируются три operating profile, Precision@K/Recall@K и паспорт каждого запуска. Новый `train_paysim.py --mode experiment` теперь, как IEEE/BAF/IBM, не считает и не записывает уже просмотренный final test.
+
 ## Локальные проверки и запуск
 
 ```powershell
