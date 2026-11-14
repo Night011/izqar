@@ -13,7 +13,7 @@ from sklearn.preprocessing import FunctionTransformer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from app.unified_network import TASKS, required_shapes
-from train_unified import (baf, balanced_cap, choose_threshold, early_stop_reached, experiment_provenance, final_evaluation, macro_normalized_pr_lift,
+from train_unified import (baf, balanced_cap, choose_threshold, early_stop_reached, experiment_provenance, final_evaluation, macro_normalized_pr_lift, normalized_pr_lifts,
                            ieee, metrics, parse_task_weights, resolve_device, transformer)  # noqa: E402
 
 
@@ -50,6 +50,31 @@ def test_unified_early_stopping_waits_for_exact_patience():
     assert not early_stop_reached(best_epoch=3, current_epoch=100, patience=None)
     score = macro_normalized_pr_lift({task: .2 for task in TASKS}, {task: .1 for task in TASKS})
     assert score == pytest.approx(1 / 9)
+
+
+def test_normalized_pr_lift_reports_all_tasks_without_losing_negative_values():
+    baseline = dict(zip(TASKS, (.5, .01, .2, .05)))
+    aps = dict(zip(TASKS, (.7, .109, .44, .031)))
+    lifts = normalized_pr_lifts(aps, baseline)
+    assert list(lifts) == list(TASKS)
+    assert lifts['paysim'] == pytest.approx(.4)
+    assert lifts['ieee_cis'] == pytest.approx(.1)
+    assert lifts['baf_base'] == pytest.approx(.3)
+    assert lifts['ibm_aml'] == pytest.approx(-.02)
+    assert macro_normalized_pr_lift(aps, baseline) == pytest.approx(.195)
+
+
+def test_normalized_pr_lift_rejects_incomplete_or_invalid_validation_metrics():
+    aps = {name: .2 for name in TASKS}
+    prevalence = {name: .1 for name in TASKS}
+    with pytest.raises(ValueError, match='exactly four tasks'):
+        normalized_pr_lifts({'paysim': .2}, prevalence)
+    for invalid in (0, 1, float('nan'), float('inf')):
+        with pytest.raises(ValueError, match='prevalence'):
+            normalized_pr_lifts(aps, {**prevalence, 'paysim': invalid})
+    for invalid in (-.1, 1.1, float('nan'), float('inf')):
+        with pytest.raises(ValueError, match='PR-AUC'):
+            normalized_pr_lifts({**aps, 'paysim': invalid}, prevalence)
 
 
 def test_unified_experiment_provenance_is_explicit_and_copies_weights():

@@ -75,10 +75,33 @@ def early_stop_reached(best_epoch: int, current_epoch: int, patience: int | None
     return patience is not None and current_epoch - best_epoch >= patience
 
 
+def normalized_pr_lifts(pr_auc: dict[str, float], prevalence: dict[str, float]) -> dict[str, float]:
+    """Compute chance-adjusted average precision for each of the four tasks.
+
+    A task's no-skill AP baseline is its validation positive prevalence. This
+    measure is for validation-only epoch selection, not fraud calibration.
+    Negative values are valid: they indicate AP below the no-skill baseline.
+    """
+    if set(pr_auc) != set(TASKS) or set(prevalence) != set(TASKS):
+        raise ValueError('PR-lift requires metrics and prevalence for exactly four tasks')
+    result = {}
+    for name in TASKS:
+        try:
+            ap = float(pr_auc[name])
+            base = float(prevalence[name])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{name} has non-numeric PR-AUC or prevalence') from exc
+        if not np.isfinite(ap) or not 0.0 <= ap <= 1.0:
+            raise ValueError(f'{name} has invalid PR-AUC')
+        if not np.isfinite(base) or not 0.0 < base < 1.0:
+            raise ValueError(f'{name} has invalid validation prevalence')
+        result[name] = (ap - base) / (1.0 - base)
+    return result
+
+
 def macro_normalized_pr_lift(pr_auc: dict[str, float], prevalence: dict[str, float]) -> float:
-    """Equal-task PR lift above each task's own random baseline."""
-    return float(np.mean([(pr_auc[name] - prevalence[name]) / max(1.0 - prevalence[name], 1e-12)
-                          for name in TASKS]))
+    """Equal-task mean chance-adjusted AP, used for validation-only selection."""
+    return float(np.mean(list(normalized_pr_lifts(pr_auc, prevalence).values())))
 
 
 def metrics(y, scores, threshold):
@@ -340,9 +363,16 @@ def main():
         model.eval(); epoch_metrics={}; prevalence={}
         with torch.no_grad():
             for name in TASKS:
-                _,_,x,y=prepared[name]; s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); epoch_metrics[name]=round(float(average_precision_score(y,s)),6); prevalence[name]=float(np.mean(y))
+                _,_,x,y=prepared[name]
+                s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy()
+                epoch_metrics[name]=float(average_precision_score(y,s))
+                prevalence[name]=float(np.mean(y))
+        task_lifts = normalized_pr_lifts(epoch_metrics, prevalence)
         score = macro_normalized_pr_lift(epoch_metrics, prevalence)
-        history.append({'epoch':epoch+1,'loss':losses,'validation_pr_auc':epoch_metrics,
+        history.append({'epoch':epoch+1,'loss':losses,
+                        'validation_pr_auc':{name:round(epoch_metrics[name],6) for name in TASKS},
+                        'validation_prevalence':{name:round(prevalence[name],8) for name in TASKS},
+                        'validation_normalized_pr_lift':{name:round(task_lifts[name],8) for name in TASKS},
                         'selection_macro_normalized_pr_lift':round(score, 8)})
         if score > best:
             best, best_epoch, best_state = score, epoch + 1, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
@@ -350,7 +380,7 @@ def main():
             torch.save({'epoch': epoch + 1, 'state_dict': best_state, 'optimizer_state': optimiser.state_dict(),
                         'selection_macro_normalized_pr_lift': best, 'seed': RNG}, args.output_dir/'unified_checkpoint.pt')
         elif early_stop_reached(best_epoch, epoch + 1, args.early_stopping_patience):
-            stop_reason = 'validation_pr_auc_patience_exhausted'
+            stop_reason = 'normalized_pr_lift_patience_exhausted'
             break
     model.load_state_dict(best_state); args.output_dir.mkdir(parents=True,exist_ok=True)
     np.savez_compressed(args.output_dir/'unified_weights.npz', **{k:v.numpy().astype('float32') for k,v in best_state.items()})
@@ -369,6 +399,8 @@ def main():
                         'task_weights':task_weights,'seed':RNG,
                         'selection_metric':'macro normalized PR-AUC lift above per-task prevalence',
                         'best_validation_macro_normalized_pr_lift':best,
+                        'best_validation_pr_auc_by_task':history[best_epoch-1]['validation_pr_auc'],
+                        'best_validation_normalized_pr_lift_by_task':history[best_epoch-1]['validation_normalized_pr_lift'],
                         'best_epoch':best_epoch, 'epochs_ran':len(history),
                         'early_stopping_patience':args.early_stopping_patience, 'stop_reason':stop_reason,
                         'seconds':round(time.monotonic()-started,3),'history':history},
