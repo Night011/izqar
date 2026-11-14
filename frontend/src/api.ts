@@ -37,11 +37,16 @@ export interface ModelStatus {
   unified_mtl?: UnifiedDetail | null;
   artifact_errors?: { ieee_cis?: string | null; paysim?: string | null; baf_base?: string | null; ibm_aml?: string | null; unified_mtl?: string | null };
 }
-export interface UnifiedDetail { model_version: string; experimental: true; score_kind: string; tasks: Record<string, { threshold: number; validation_metrics: TestMetrics }> }
+export interface UnifiedDetail {
+  model_version: string; experimental: true; score_kind: string;
+  tasks: Record<string, { threshold: number; validation_metrics: TestMetrics }>;
+  task_schemas: Record<string, string[]>;
+}
 export interface TestMetrics {
   precision: number; recall: number; f1: number; average_precision_pr_auc: number; roc_auc: number;
   confusion_matrix_tn_fp_fn_tp: [number, number, number, number];
-  false_alerts_per_10000_operations: number; cases: number; fraud_cases: number;
+  false_positive_rate: number; false_negative_rate: number;
+  false_alerts_per_10000_operations: number; cases: number; fraud_cases?: number; positive_cases?: number;
 }
 export interface ModelDetail {
   features: number; feature_names: string[]; test_metrics: TestMetrics | null; threshold: number;

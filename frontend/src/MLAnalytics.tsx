@@ -7,6 +7,9 @@ import './model-registry.css';
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const examplePaySim = JSON.stringify({ type: 'TRANSFER', amount: 150000, oldbalanceOrg: 180000, oldbalanceDest: 20000 }, null, 2);
 const names: Record<string, string> = { paysim: 'PaySim', ieee_cis: 'IEEE-CIS', baf_base: 'BAF Base', ibm_aml: 'IBM AML', izqar_unified_mtl: 'Unified Intelligence' };
+type SpecialistKind = 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml';
+type SelectedModel = SpecialistKind | 'unified_paysim' | 'unified_ieee_cis' | 'unified_baf_base' | 'unified_ibm_aml';
+const unifiedTask = (kind: SelectedModel): SpecialistKind | null => kind.startsWith('unified_') ? kind.slice('unified_'.length) as SpecialistKind : null;
 
 function RegistryRow({ entry }: { entry: RegistryEntry }) {
   const label = entry.state === 'installed' ? 'Артефакт установлен' : entry.state === 'report_only' ? 'Только отчёт' : 'Ошибка метаданных';
@@ -37,11 +40,11 @@ function ModelCard({ title, detail, error }: { title: string; detail?: ModelDeta
 
 function UnifiedCard({ detail, error }: { detail?: import('./api').UnifiedDetail | null; error?: string | null }) {
   if (!detail) return <section className="panel ml-card"><h2>Unified Intelligence · эксперимент</h2><p>{error ? `Ошибка артефакта: ${error}` : 'Совместно обученный артефакт ещё не установлен'}</p><p>Четыре специализированные модели остаются рабочими детекторами.</p></section>;
-  return <section className="panel ml-card"><div className="ml-card-head"><div><h2>Unified Intelligence · эксперимент</h2><p>{detail.model_version} · общий backbone и четыре независимые головы</p></div><span className="count-tag">validation only</span></div><p>Метрики ниже нельзя сопоставлять с ранее просмотренными финальными test специализированных моделей.</p><div className="ml-metrics">{Object.entries(detail.tasks).map(([task, item]) => <div key={task}><span>{names[task]}</span><strong>F1 {item.validation_metrics.f1.toFixed(3)}</strong><small>PR-AUC {item.validation_metrics.average_precision_pr_auc.toFixed(3)}</small></div>)}</div><p>Экспериментальный uncalibrated score. Отрицательный перенос проверяется сравнением на соответствующих validation-периодах.</p></section>;
+  return <section className="panel ml-card"><div className="ml-card-head"><div><h2>Unified Intelligence · эксперимент</h2><p>{detail.model_version} · общий backbone и четыре независимые головы</p></div><span className="count-tag">validation only</span></div><p>Метрики ниже получены на validation-периодах и не сопоставимы с ранее просмотренными финальными test специализированных моделей.</p><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Задача</th><th>Precision</th><th>Recall</th><th>F1</th><th>PR-AUC</th><th>ROC-AUC</th><th>FPR / FNR</th><th>Ложн. тревоги / 10k</th><th>TN / FP / FN / TP</th></tr></thead><tbody>{Object.entries(detail.tasks).map(([task, item]) => { const m = item.validation_metrics; return <tr key={task}><td>{names[task] ?? task}<small>{m.cases.toLocaleString('ru-RU')} validation записей</small></td><td>{pct(m.precision)}</td><td>{pct(m.recall)}</td><td>{pct(m.f1)}</td><td>{pct(m.average_precision_pr_auc)}</td><td>{pct(m.roc_auc)}</td><td>{pct(m.false_positive_rate)} / {pct(m.false_negative_rate)}</td><td>{m.false_alerts_per_10000_operations.toFixed(1)}</td><td>{m.confusion_matrix_tn_fp_fn_tp.join(' / ')}</td></tr>; })}</tbody></table></div><p>Экспериментальный некалиброванный ML-скор; графовые и rule-based сигналы с ним не объединяются. Отрицательный перенос проверяется сравнением на соответствующих validation-периодах.</p></section>;
 }
 
 export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; apiKey: string }) {
-  const [kind, setKind] = useState<'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml'>('paysim');
+  const [kind, setKind] = useState<SelectedModel>('paysim');
   const [input, setInput] = useState(examplePaySim);
   const [result, setResult] = useState<ModelPrediction | null>(null);
   const [error, setError] = useState('');
@@ -54,9 +57,12 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
       .catch((exc: Error) => { if (mounted) setRegistryError(exc.message); });
     return () => { mounted = false; };
   }, [apiKey, status]);
-  const detail = status?.[kind];
-  const changeKind = (next: 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml') => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
-  const template = () => setInput(JSON.stringify(Object.fromEntries((detail?.feature_names ?? []).map(name => [name,
+  const selectedUnifiedTask = unifiedTask(kind);
+  const specialistKind: SpecialistKind | null = selectedUnifiedTask ? null : kind as SpecialistKind;
+  const detail = specialistKind ? status?.[specialistKind] : null;
+  const selectedFeatures = selectedUnifiedTask ? status?.unified_mtl?.task_schemas[selectedUnifiedTask] ?? [] : detail?.feature_names ?? [];
+  const changeKind = (next: SelectedModel) => { setKind(next); setResult(null); setError(''); setInput(next === 'paysim' ? examplePaySim : ''); };
+  const template = () => setInput(JSON.stringify(Object.fromEntries(selectedFeatures.map(name => [name,
     kind === 'ibm_aml' ? ({ amount_paid: 150, log_amount_paid: Math.log1p(150), same_bank: 0, same_currency: 1, hour: 12, weekday: 0,
       receiving_currency: 'USD', payment_currency: 'USD', payment_format: 'Wire' } as Record<string, number | string>)[name] :
     name === 'TransactionAmt' ? 150 : name === 'ProductCD' ? 'W' : null])), null, 2));
@@ -65,7 +71,7 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
     try {
       const features = JSON.parse(input) as unknown;
       if (!features || typeof features !== 'object' || Array.isArray(features)) throw new Error('Введите JSON-объект признаков');
-      const path = kind === 'paysim' ? '/api/v1/paysim/predict' : kind === 'baf_base' ? '/api/v1/baf/predict' : kind === 'ibm_aml' ? '/api/v1/ibm-aml/predict' : '/api/v1/ieee/predict';
+      const path = selectedUnifiedTask ? `/api/v1/unified/${selectedUnifiedTask}/predict` : kind === 'paysim' ? '/api/v1/paysim/predict' : kind === 'baf_base' ? '/api/v1/baf/predict' : kind === 'ibm_aml' ? '/api/v1/ibm-aml/predict' : '/api/v1/ieee/predict';
       setResult(await request<ModelPrediction>(path, apiKey, { method: 'POST', body: JSON.stringify({ features }) }));
     } catch (exc) { setError((exc as Error).message); }
     finally { setBusy(false); }
@@ -81,10 +87,10 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
         {registry.entries.filter(entry => !entry.active_for).map(entry => <RegistryRow key={entry.manifest} entry={entry} />)}
       </tbody></table></div></details></>}
     </section>
-    <section className="panel ml-card"><h2>Проверка ML-инференса</h2><p>Введите поля именно выбранной модели. Примерные значения в шаблоне служат только технической проверке API.</p>
-      <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml')}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option><option value="baf_base">BAF Base</option><option value="ibm_aml">IBM AML</option></select><button type="button" onClick={template} disabled={!detail}>Шаблон признаков</button></div>
+    <section className="panel ml-card"><h2>Проверка ML-инференса</h2><p>Введите поля именно выбранной модели. Шаблон заполнен значениями для проверки схемы, а не реалистичной банковской операцией.</p>
+      <div className="ml-actions"><select aria-label="Выбор ML-модели" value={kind} onChange={e => changeKind(e.target.value as SelectedModel)}><option value="paysim">PaySim</option><option value="ieee_cis">IEEE-CIS</option><option value="baf_base">BAF Base</option><option value="ibm_aml">IBM AML</option>{status?.unified_mtl && <optgroup label="Unified Intelligence · эксперимент"><option value="unified_paysim">Unified · PaySim</option><option value="unified_ieee_cis">Unified · IEEE-CIS</option><option value="unified_baf_base">Unified · BAF Base</option><option value="unified_ibm_aml">Unified · IBM AML</option></optgroup>}</select><button type="button" onClick={template} disabled={selectedFeatures.length === 0}>Шаблон признаков</button></div>
       <textarea aria-label="JSON признаков" spellCheck={false} value={input} onChange={e => setInput(e.target.value)} rows={9} />
-      <button className="primary" disabled={!detail || busy} onClick={predict}>{busy ? 'Оцениваем…' : 'Получить оценку модели'}</button>
+      <button className="primary" disabled={selectedFeatures.length === 0 || busy} onClick={predict}>{busy ? 'Оцениваем…' : 'Получить оценку модели'}</button>
       {error && <p className="ml-error">{error}</p>}
       {result && <div className="ml-result"><strong>{result.flagged ? 'Выше порога' : 'Ниже порога'} · скор {result.risk_score.toFixed(2)} / 100</strong><span>{result.source} · {result.model_version} · порог {result.threshold.toFixed(4)}</span><p>{result.warning}</p></div>}
     </section>

@@ -46,4 +46,7 @@ def test_unified_missing_or_valid_cpu_artifact(client, auth, tmp_path, monkeypat
                            json={'features': {'amount': 10}}).status_code == 422
         assert client.post('/api/v1/unified/paysim/predict', headers=auth,
                            json={'features': {'isFraud': 1}}).status_code == 422
+        status = client.get('/api/v1/model/status', headers=auth)
+        assert status.status_code == 200
+        assert status.json()['unified_mtl']['task_schemas'] == {task: ['amount'] for task in TASKS}
     ml.load_unified_model.cache_clear()

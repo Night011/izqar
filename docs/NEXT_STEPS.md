@@ -19,7 +19,7 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-4. Проверьте `GET /api/v1/model/status` и отдельный `POST /api/v1/unified/<task>/predict` с точной схемой `task_metadata.<task>.feature_schema` из манифеста.
+4. Проверьте `GET /api/v1/model/status`: поле `unified_mtl.task_schemas.<task>` должно совпасть с `task_metadata.<task>.feature_schema.all` из манифеста. Затем выполните отдельный `POST /api/v1/unified/<task>/predict` с этой точной схемой. Панель ML Analytics умеет сформировать такой шаблон после установки артефакта.
 
 ## Локальные проверки и запуск
 

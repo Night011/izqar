@@ -229,6 +229,10 @@ def model_status():
             'baf_base': summary(baf),
             'ibm_aml': summary(ibm_aml),
             'unified_mtl': ({'model_version': unified['report']['model_version'], 'tasks': unified['report']['tasks'],
+                             # Expose the serving schema, not labels or preprocessing internals.  The
+                             # React console needs it to construct an exact, validated request for a
+                             # selected Unified task rather than guessing a cross-dataset payload.
+                             'task_schemas': {task: schema['all'] for task, schema in unified['schema'].items()},
                              'score_kind': 'uncalibrated_ml_score', 'experimental': True} if unified else None),
             'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf or ibm_aml) and not (ieee_error or paysim_error or baf_error or ibm_aml_error) else None,
             'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error, 'ibm_aml': ibm_aml_error, 'unified_mtl': unified_error}}
