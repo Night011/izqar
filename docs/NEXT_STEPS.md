@@ -92,6 +92,15 @@ Kaggle kernel `hoogle57/izqar-ieee-extended-cv-weight-1-25-candidate-v1` зав�
 
 На fixed validation window (88 581 операций, budget 100 FP/10k): PR-AUC `0.464304`, Precision `0.577458`, Recall `0.395792`, F1 `0.469670`, FP `881`, FN `1 838`, 99.457 FP/10k. Это немного улучшает предыдущий verified candidate, но не является basis для auto-promotion. Следующая final evaluation допустима только один раз после явного freeze выбранной configuration; повторно использовать старый final test для подбора нельзя.
 
+### Early-stopping candidates, 14 ноября 2026
+
+Commit `ab6179906b448b3204e57bafb281e8ac4333fa3d` добавил optional XGBoost early stopping, который получает только validation transform; preprocessing остаётся fit только на train, final test не передаётся в `.fit()`. Два single-configuration Kaggle runs завершены и импортированы только как reports:
+
+- BAF `baf_weight075_early_stop_budget100`: PR-AUC `0.165998`, Recall `0.237931`, F1 `0.240084`, 99.752 FP/10k; best iteration 298/600; ZIP SHA-256 `E1A29DB6BA7431CD8F572B12E3C5A6DE6193AC0D7B50633C499A0F3EBF5AD4D9`.
+- IEEE `ieee_extended_cv_weight125_early_stop_budget100`: PR-AUC `0.503531`, Recall `0.417817`, F1 `0.489034`, 99.909 FP/10k; best iteration 599/600; ZIP SHA-256 `5E878F76829616D5AA45B425AB16D1EF390E0AFE66D0B0A9BE628A06F7843C84`.
+
+Оба результата используют уже фиксированные validation windows и не дают разрешения запускать прежние final holdouts. Не делайте ещё один подбор на этих же окнах без заранее зарегистрированного протокола. Kaggle CLI потерял OAuth после запуска IBM early-stop candidate; не извлекайте browser cookies/tokens. После штатного `kaggle auth login` проверьте exact kernel URL/status, затем скачайте только report ZIP и проверьте CRC/SHA-256 перед импортом.
+
 ### BAF и PaySim weight 0.75 candidates
 
 Оба Kaggle run привязаны к commit `32f288ba3d0756277e33971fc05f461745cfa606`, используют прежние temporal splits и не считают final test. BAF `positive_weight_multiplier=0.75` улучшил validation PR-AUC/Recall/F1 относительно baseline без роста FP budget: `0.164185` / `0.229655` / `0.232542` при 99.937 FP/10k. Он остаётся candidate до явного freeze и одной final evaluation. PaySim `positive_weight_multiplier=0.75` улучшил PR-AUC/F1 и сократил FP, но снизил общую и CASH_OUT Recall; он записан только как trade-off candidate, а baseline сохраняется для recall-приоритета.
