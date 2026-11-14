@@ -47,6 +47,8 @@ cd backend
 
 Не запускайте `--mode final` для настройки этих старых holdout. Для Unified остаётся отдельная sealed one-time final процедура из [NEXT_STEPS.md](NEXT_STEPS.md).
 
+`scripts/ibm_history_features.py` уже реализует и unit-test проверяет feature builder для prior outgoing/incoming counts, amounts и time-since-activity. Он группирует одинаковые timestamp до обновления state и использует Account только как ключ истории. Он ещё **не подключён к IBM active/candidate trainer**: это намеренно следующий проверяемый этап, чтобы сначала сохранить границы streaming-процесса и не выдать непроверенный historical candidate за улучшение.
+
 ## Интерпретация результатов
 
 - **Monitoring** подходит для исследования покрытия; он не означает автоматическую блокировку.
