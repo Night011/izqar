@@ -36,6 +36,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from train_baf import CATEGORICAL as BAF_CATS, FEATURES as BAF_FEATURES, NUMERIC as BAF_NUMS, read_base, split_months
 from train_ibm_aml import load_splits as ibm_splits, time_boundaries as ibm_boundaries, validate_file as validate_ibm
+from train_ieee import calibration_diagnostics
 from app.unified_network import UnifiedNetwork
 
 TASKS = ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')
@@ -332,7 +333,7 @@ def main():
     model.eval()
     with torch.no_grad():
         for name in TASKS:
-            _,_,x,y=prepared[name]; scores=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); threshold=choose_threshold(y,scores); outputs[name]={'threshold':threshold,'validation_metrics':metrics(y,scores,threshold)}
+            _,_,x,y=prepared[name]; scores=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); threshold=choose_threshold(y,scores); outputs[name]={'threshold':threshold,'validation_metrics':metrics(y,scores,threshold),'validation_calibration':calibration_diagnostics(y,scores)}
     report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1',
             'run_mode':'experiment','experiment':experiment_provenance(task_weights),
             'trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1',

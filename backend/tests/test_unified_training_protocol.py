@@ -66,6 +66,15 @@ def test_capping_preserves_temporal_order_and_validation_metrics_are_complete():
                            'confusion_matrix_tn_fp_fn_tp', 'false_alerts_per_10000_operations'}
 
 
+def test_unified_calibration_diagnostic_is_validation_only_and_not_probability_claim():
+    from train_ieee import calibration_diagnostics
+    report = calibration_diagnostics(np.array([0, 0, 1, 1], dtype=np.int8),
+                                     np.array([.1, .3, .7, .9], dtype=np.float32))
+    assert report['brier_score_uncalibrated'] >= 0
+    assert sum(bucket['cases'] for bucket in report['bins']) == 4
+    assert 'not calibrated' in report['warning']
+
+
 def test_ieee_adapter_requires_identity_and_enforces_one_to_one_merge(tmp_path):
     transaction = pd.DataFrame({'TransactionID': list(range(100, 140)), 'TransactionDT': list(range(40)),
         'TransactionAmt': [1.] * 40, 'card1': [1] * 40, 'card2': [1] * 40, 'card3': [1] * 40,
