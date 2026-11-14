@@ -1,8 +1,15 @@
 """Registry reads metadata without executing serialized model code."""
 import json
 from pathlib import Path
+import sys
+import zipfile
+
+import pytest
 
 from app.model_registry import list_registry
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+from import_experiment_report import import_report  # noqa: E402
 
 
 def test_registry_active_archive_and_missing_component(tmp_path):
@@ -68,3 +75,22 @@ def test_registry_marks_nonactive_final_reports_as_archived(tmp_path):
     manifest.write_text(json.dumps(report), encoding='utf-8')
     entry = list_registry({}, root)['entries'][0]
     assert entry['state'] == 'report_only' and entry['lifecycle'] == 'archived'
+
+
+def test_imported_validation_report_is_candidate_without_model_payload(tmp_path):
+    report = {'format_version': 2, 'model_kind': 'paysim', 'model_version': 'candidate',
+              'features': ['amount'], 'threshold': .5, 'run_mode': 'experiment',
+              'test_metrics': None, 'baseline_test_metrics': None,
+              'experiment': {'mode': 'experiment', 'experiment_id': 'unit'}}
+    run = {'mode': 'experiment', 'test_evaluation_performed': False,
+           'expected_revision': 'a' * 40, 'actual_revision': 'a' * 40}
+    archive = tmp_path / 'candidate.zip'
+    with zipfile.ZipFile(archive, 'w') as zipped:
+        zipped.writestr('candidate.metrics.json', json.dumps(report))
+        zipped.writestr('candidate_run.json', json.dumps(run))
+    report_path, run_path = import_report(archive, tmp_path / 'models' / 'experiments')
+    assert report_path.is_file() and run_path.is_file()
+    entry = list_registry({}, tmp_path / 'models')['entries'][0]
+    assert entry['state'] == 'report_only' and entry['lifecycle'] == 'candidate'
+    with pytest.raises(FileExistsError):
+        import_report(archive, tmp_path / 'models' / 'experiments')

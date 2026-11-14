@@ -14,9 +14,10 @@ const unifiedTask = (kind: SelectedModel): SpecialistKind | null => kind.startsW
 function RegistryRow({ entry }: { entry: RegistryEntry }) {
   const label = entry.state === 'installed' ? 'Артефакт установлен' : entry.state === 'report_only' ? 'Только отчёт' : 'Ошибка метаданных';
   const lifecycle = entry.lifecycle === 'active' ? 'Активная' : entry.lifecycle === 'candidate' ? 'Кандидат · не обслуживает API' : 'Архив · не обслуживает API';
+  const quality = entry.test_metrics ? `Test F1 ${entry.test_metrics.f1.toFixed(3)} · PR-AUC ${entry.test_metrics.average_precision_pr_auc.toFixed(3)}` : entry.validation_metrics ? `Validation F1 ${entry.validation_metrics.f1.toFixed(3)} · PR-AUC ${entry.validation_metrics.average_precision_pr_auc.toFixed(3)}` : 'Нет проверенных метрик';
   return <tr><td><strong>{names[entry.model_kind ?? entry.active_for ?? ''] ?? entry.model_kind ?? 'Неизвестная модель'}</strong><small>{lifecycle}</small></td>
     <td>{entry.model_version ?? '—'}</td><td>{label}{entry.error && <small>{entry.error}</small>}</td>
-    <td>{entry.test_metrics ? `F1 ${entry.test_metrics.f1.toFixed(3)} · PR-AUC ${entry.test_metrics.average_precision_pr_auc.toFixed(3)}` : 'Нет test-метрик'}</td>
+    <td>{quality}</td>
     <td><details><summary>Происхождение</summary><p>{entry.dataset ?? 'Источник не указан'}</p><p>Манифест: {entry.manifest}</p><p>SHA-256: {entry.manifest_sha256 ?? '—'}</p>
       {entry.data_files?.map(file => <p key={file.filename}>Данные: {file.filename} · SHA-256 {file.sha256 ?? 'не указан'}</p>)}
       {entry.components?.map(file => <p key={file.filename}>Компонент: {file.filename} · SHA-256 {file.sha256}</p>)}</details></td></tr>;
