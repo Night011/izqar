@@ -28,7 +28,7 @@ Gradient audit для общей backbone был ненулевым: PaySim `0.2
 ## Платформа
 
 - React: мониторинг, Model Registry, ML Analytics, интерактивный NetworkX/Cytoscape граф и рабочее место расследований. Граф ограниченно показывает fan-in/fan-out, быстрые цепочки и направленные трёхузловые циклы как сигналы, а не доказательства.
-- Backend: четыре специализированных endpoint-инференса; очередь расследований, статусы, комментарии и append-only `investigation_events` для синтетических переводов.
+- Backend: четыре специализированных endpoint-инференса; очередь расследований, статусы, комментарии и append-only `investigation_events` для синтетических переводов. Endpoint ML assessment запускает выбранную модель server-side и хранит только provenance, итоговый score и имена полей — не пользовательские feature values; score не меняет Rule Engine или решение аналитика.
 - Unified endpoint: `POST /api/v1/unified/{paysim|ieee_cis|baf_base|ibm_aml}/predict` установлен и проверен через FastAPI `TestClient`: все четыре heads вернули `200` с точной schema из manifest. `/api/v1/model/status` показывает экспериментальный статус, validation-only метрики и schema без меток.
 - Специализированные API и Unified загружены одновременно: PaySim, IEEE-CIS, BAF Base, IBM AML и Unified имеют `artifact_errors: null`; `ready: true`.
 - Frontend production build разделён по вкладкам: начальный JS уменьшен с 731.84 kB до 256.45 kB; Cytoscape/Network Explorer и рабочие пространства расследований/ML загружаются только при открытии нужной вкладки.
@@ -52,5 +52,5 @@ Gradient audit для общей backbone был ненулевым: PaySim `0.2
 
 1. Не запускать Unified final test для подбора параметров. Если решение о конфигурации зафиксировано, выполнить ровно одну изолированную final-оценку в Kaggle по документированной команде ниже.
 2. Продолжить validation-only исследования улучшения IBM AML, BAF, IEEE и PaySim; прежние финальные test не переиспользовать для выбора.
-3. Ввести ML-оценки как самостоятельные сохраняемые инциденты без подмены их Rule Engine переводами.
+3. Связать UI ML Analytics с созданием отдельной ML assessment для существующего расследования только после явного выбора аналитиком; не подменять Rule Engine или решение человека.
 4. Запустить новый ограниченный IBM graph-анализатор на Kaggle HI-Small и сохранить агрегированный отчёт; не выдавать графовый сигнал за подтверждённое отмывание.

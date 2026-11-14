@@ -75,6 +75,28 @@ class InvestigationEventOut(BaseModel):
     actor_source: str
 
 
+class MlAssessmentIn(BaseModel):
+    model: Literal['paysim', 'ieee_cis', 'baf_base', 'ibm_aml',
+                   'unified_paysim', 'unified_ieee_cis', 'unified_baf_base', 'unified_ibm_aml']
+    features: dict[str, float | str | None] = Field(min_length=1, max_length=100)
+
+
+class InvestigationMlAssessmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    transaction_id: str
+    created_at: datetime
+    model_key: str
+    model_version: str
+    source: str
+    score_kind: str
+    risk_score: float
+    threshold: float
+    flagged: bool
+    warning: str
+    feature_names: list[str]
+
+
 class InvestigationListOut(BaseModel):
     total: int
     items: list[TransactionOut]
@@ -85,6 +107,7 @@ class InvestigationDetailOut(BaseModel):
     events: list[InvestigationEventOut]
     events_total: int
     related_transactions: list[TransactionOut]
+    ml_assessments: list[InvestigationMlAssessmentOut]
 
 class SimulationIn(BaseModel):
     scenario: Literal['normal', 'new_recipient', 'velocity', 'fan_in', 'chain', 'cycle']

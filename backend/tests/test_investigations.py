@@ -57,3 +57,29 @@ def test_no_unlogged_or_invalid_case_changes(client, auth):
     assert len(detail['events']) == 1
     assert detail['events'][0]['to_state'] == 'allowed'
     assert detail['transaction']['decision'] == 'review'  # original rule suggestion is retained
+
+
+def test_case_can_record_only_server_produced_ml_assessment(client, auth, monkeypatch):
+    import app.main as main
+    monkeypatch.setattr(main, 'predict_paysim', lambda _: {
+        'risk_score': 77.7, 'threshold': .8, 'flagged': False, 'source': 'paysim_ml',
+        'model_version': 'test-model', 'score_kind': 'uncalibrated_ml_score', 'warning': 'test warning',
+    })
+    row = client.post('/api/v1/demo/simulate', json={'scenario': 'new_recipient'}, headers=auth).json()[0]
+    path = f"/api/v1/investigations/{row['id']}/ml-assessments"
+    response = client.post(path, headers=auth, json={'model': 'paysim', 'features': {
+        'type': 'TRANSFER', 'amount': 150000, 'oldbalanceOrg': 180000, 'oldbalanceDest': 20000,
+    }})
+    assert response.status_code == 200, response.text
+    assessment = response.json()
+    assert assessment['source'] == 'paysim_ml'
+    assert assessment['score_kind'] == 'uncalibrated_ml_score'
+    assert assessment['feature_names'] == ['amount', 'oldbalanceDest', 'oldbalanceOrg', 'type']
+    # Dataset labels are rejected by the actual ML schema and never persisted.
+    invalid = client.post(path, headers=auth, json={'model': 'paysim', 'features': {
+        'type': 'TRANSFER', 'amount': 1, 'oldbalanceOrg': 1, 'oldbalanceDest': 1, 'isFraud': 1,
+    }})
+    assert invalid.status_code == 422
+    detail = client.get(f"/api/v1/investigations/{row['id']}", headers=auth).json()
+    assert len(detail['ml_assessments']) == 1
+    assert detail['events'][-1]['action'] == 'ml_assessment'

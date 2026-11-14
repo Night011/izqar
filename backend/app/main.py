@@ -12,13 +12,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH, validate_config
 from .database import Base, engine, get_db
-from .models import Transaction, InvestigationEvent
+from .models import Transaction, InvestigationEvent, InvestigationMlAssessment
 from .schemas import (TransferIn, TransactionOut, SimulationIn, ReviewIn, CommentIn,
                       InvestigationEventOut, InvestigationListOut, InvestigationDetailOut,
-                      IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn, UnifiedFeaturesIn)
+                      IeeeFeaturesIn, PaySimFeaturesIn, BafFeaturesIn, IbmAmlFeaturesIn, UnifiedFeaturesIn,
+                      MlAssessmentIn, InvestigationMlAssessmentOut)
 from .risk import assess
 from .graph import build_graph
 from .model_registry import list_registry
+from .model_registry import FORBIDDEN
 from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, load_unified_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml, predict_unified
 
 @asynccontextmanager
@@ -147,8 +149,12 @@ def investigation_detail(tx_id: str, db: Session = Depends(get_db)):
                                          Transaction.recipient.in_(accounts)))
                               .order_by(Transaction.created_at.desc(), Transaction.id.desc())
                               .limit(50)))
+    assessments = list(reversed(list(db.scalars(select(InvestigationMlAssessment)
+                                                 .where(InvestigationMlAssessment.transaction_id == tx_id)
+                                                 .order_by(InvestigationMlAssessment.created_at.desc(), InvestigationMlAssessment.id.desc())
+                                                 .limit(100)))))
     return {'transaction': tx, 'events': events, 'events_total': events_total,
-            'related_transactions': related}
+            'related_transactions': related, 'ml_assessments': assessments}
 
 
 @app.post('/api/v1/investigations/{tx_id}/comments', response_model=InvestigationEventOut,
@@ -164,6 +170,45 @@ def add_investigation_comment(tx_id: str, payload: CommentIn, db: Session = Depe
     db.commit()
     db.refresh(event)
     return event
+
+
+@app.post('/api/v1/investigations/{tx_id}/ml-assessments', response_model=InvestigationMlAssessmentOut,
+          dependencies=[Depends(require_key)])
+def add_ml_assessment(tx_id: str, payload: MlAssessmentIn, db: Session = Depends(get_db)):
+    """Run a selected model server-side and preserve provenance, not raw inputs."""
+    tx = db.get(Transaction, tx_id)
+    if tx is None:
+        raise HTTPException(status_code=404, detail='Транзакция не найдена')
+    forbidden = sorted(set(payload.features) & FORBIDDEN)
+    if forbidden:
+        raise HTTPException(status_code=422, detail=f'Forbidden assessment features: {forbidden}')
+    model_map = {
+        'paysim': predict_paysim, 'ieee_cis': predict_ieee, 'baf_base': predict_baf, 'ibm_aml': predict_ibm_aml,
+        'unified_paysim': lambda features: predict_unified('paysim', features),
+        'unified_ieee_cis': lambda features: predict_unified('ieee_cis', features),
+        'unified_baf_base': lambda features: predict_unified('baf_base', features),
+        'unified_ibm_aml': lambda features: predict_unified('ibm_aml', features),
+    }
+    try:
+        prediction = model_map[payload.model](payload.features)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f'ML model is incompatible: {exc}') from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if prediction is None:
+        raise HTTPException(status_code=503, detail='Selected ML model is not installed')
+    assessment = InvestigationMlAssessment(
+        transaction_id=tx.id, model_key=payload.model, model_version=prediction['model_version'],
+        source=prediction['source'], score_kind=prediction['score_kind'], risk_score=prediction['risk_score'],
+        threshold=prediction['threshold'], flagged=prediction['flagged'], warning=prediction['warning'],
+        feature_names=sorted(payload.features),
+    )
+    db.add(assessment)
+    db.add(InvestigationEvent(transaction_id=tx.id, action='ml_assessment', from_state=tx.review_state,
+                              to_state=tx.review_state, comment=f'ML assessment: {payload.model}'))
+    db.commit()
+    db.refresh(assessment)
+    return assessment
 
 @app.get('/api/v1/metrics', dependencies=[Depends(require_key)])
 def metrics(db: Session = Depends(get_db)):

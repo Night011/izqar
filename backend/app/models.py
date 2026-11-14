@@ -38,3 +38,24 @@ class InvestigationEvent(Base):
     to_state: Mapped[str | None] = mapped_column(String(24))
     comment: Mapped[str | None] = mapped_column(String(2000))
     actor_source: Mapped[str] = mapped_column(String(32), default='local_demo_api_key')
+
+
+class InvestigationMlAssessment(Base):
+    """A server-produced ML result linked to a case, never a human verdict."""
+
+    __tablename__ = 'investigation_ml_assessments'
+    __table_args__ = (Index('ix_ml_assessment_tx_created', 'transaction_id', 'created_at'),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    transaction_id: Mapped[str] = mapped_column(String(36), ForeignKey('transactions.id'), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    model_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    score_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_score: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    flagged: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    warning: Mapped[str] = mapped_column(String(1000), nullable=False)
+    # Keep only the exact schema keys; raw inputs can be sensitive and remain
+    # outside the local demo investigation store.
+    feature_names: Mapped[list] = mapped_column(JSON, default=list)

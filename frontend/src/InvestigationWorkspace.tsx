@@ -147,6 +147,8 @@ export function InvestigationWorkspace({ apiKey, initialId, onChanged }: {
           <h3><ShieldAlert size={16}/> Причины сигнала</h3>
           <ul className="case-reasons">{detail.transaction.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
           <p className="case-caveat">Риск рассчитан демонстрационными правилами. Наличие сигнала или связи не подтверждает мошенничество.</p>
+          <h3><ShieldAlert size={16}/> ML-оценки дела</h3>
+          {detail.ml_assessments.length ? <div className="case-events">{detail.ml_assessments.map(assessment => <div key={assessment.id}><strong>{assessment.model_key} · {assessment.flagged ? 'выше порога' : 'ниже порога'} · скор {assessment.risk_score.toFixed(2)}/100</strong><small>{assessment.model_version} · {assessment.score_kind} · схема: {assessment.feature_names.join(', ')}</small><p>{assessment.warning}</p></div>)}</div> : <p className="case-caveat">ML-оценок нет. Демо-перевод не сопоставляется автоматически с иной схемой датасета.</p>}
           <h3><GitBranch size={16}/> Связанные счета и операции</h3>
           {graph && <Graph data={graph} />}
           <div className="case-related">{detail.related_transactions.length ? detail.related_transactions.map(tx => <button key={tx.id} onClick={() => setSelectedId(tx.id)}>

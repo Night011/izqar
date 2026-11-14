@@ -79,6 +79,13 @@ export interface InvestigationList { total: number; items: Transaction[] }
 export interface InvestigationDetail {
   transaction: Transaction; events: InvestigationEvent[]; events_total: number;
   related_transactions: Transaction[];
+  ml_assessments: MlAssessment[];
+}
+
+export interface MlAssessment {
+  id: string; transaction_id: string; created_at: string; model_key: string; model_version: string;
+  source: string; score_kind: string; risk_score: number; threshold: number; flagged: boolean;
+  warning: string; feature_names: string[];
 }
 
 const ROOT = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
