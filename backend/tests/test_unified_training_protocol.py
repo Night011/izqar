@@ -154,5 +154,7 @@ def test_final_evaluation_reads_frozen_export_once_without_training(tmp_path, mo
     assert set(result['tasks']) == set(TASKS)
     assert (tmp_path / 'unified.final_test.json').is_file()
     assert result['tasks']['paysim']['threshold_from_validation'] == .5
+    assert result['tasks']['paysim']['final_calibration']['brier_score_uncalibrated'] >= 0
+    assert 'not calibrated' in result['tasks']['paysim']['final_calibration']['warning']
     with pytest.raises(FileExistsError, match='refusing'):
         final_evaluation(args)

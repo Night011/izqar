@@ -227,7 +227,9 @@ def final_evaluation(args) -> dict:
         threshold = report['tasks'][name].get('threshold')
         if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
             raise ValueError(f'{name} has no valid validation-selected threshold')
-        outputs[name] = {'threshold_from_validation': float(threshold), 'final_test_metrics': metrics(y_test, scores, float(threshold))}
+        outputs[name] = {'threshold_from_validation': float(threshold),
+                         'final_test_metrics': metrics(y_test, scores, float(threshold)),
+                         'final_calibration': calibration_diagnostics(y_test, scores)}
     final = {
         'format_version': 1,
         'evaluation_type': 'one_time_sealed_final_test',
