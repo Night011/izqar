@@ -57,6 +57,8 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 До новых data artifacts используйте [протокол оптимизации](ML_OPTIMIZATION_PROTOCOL.md). В нём фиксируются три operating profile, Precision@K/Recall@K и паспорт каждого запуска. Новый `train_paysim.py --mode experiment` теперь, как IEEE/BAF/IBM, не считает и не записывает уже просмотренный final test.
 
+Каждый отчёт из `models/experiments/` показывается в Model Registry как **кандидат** и не может заменить API-модель сам по себе. После независимой проверки и явного решения о promotion сохраните финальный артефакт вне `models/experiments/`, проверьте provenance/SHA-256 и только затем явно настройте путь активной модели. Не копируйте candidate-файлы поверх serving-артефактов вручную.
+
 ## Локальные проверки и запуск
 
 ```powershell

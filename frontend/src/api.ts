@@ -71,7 +71,7 @@ export interface ModelPrediction {
   explanation?: { feature: string; log_odds_contribution: number; direction: 'increases_model_score' | 'decreases_model_score' }[];
 }
 export interface RegistryEntry {
-  manifest: string; active_for: string | null; state: 'installed' | 'report_only' | 'invalid'; error?: string | null;
+  manifest: string; active_for: string | null; state: 'installed' | 'report_only' | 'invalid'; lifecycle: 'active' | 'candidate' | 'archived'; error?: string | null;
   model_kind?: string; model_version?: string; dataset?: string; trained_at_utc?: string;
   manifest_sha256?: string; feature_count?: number;
   data_files?: { filename: string; size_bytes?: number; sha256?: string }[];

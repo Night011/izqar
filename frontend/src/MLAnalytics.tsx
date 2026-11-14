@@ -13,7 +13,8 @@ const unifiedTask = (kind: SelectedModel): SpecialistKind | null => kind.startsW
 
 function RegistryRow({ entry }: { entry: RegistryEntry }) {
   const label = entry.state === 'installed' ? 'Артефакт установлен' : entry.state === 'report_only' ? 'Только отчёт' : 'Ошибка метаданных';
-  return <tr><td><strong>{names[entry.model_kind ?? entry.active_for ?? ''] ?? entry.model_kind ?? 'Неизвестная модель'}</strong><small>{entry.active_for ? 'Активная' : 'История'}</small></td>
+  const lifecycle = entry.lifecycle === 'active' ? 'Активная' : entry.lifecycle === 'candidate' ? 'Кандидат · не обслуживает API' : 'Архив · не обслуживает API';
+  return <tr><td><strong>{names[entry.model_kind ?? entry.active_for ?? ''] ?? entry.model_kind ?? 'Неизвестная модель'}</strong><small>{lifecycle}</small></td>
     <td>{entry.model_version ?? '—'}</td><td>{label}{entry.error && <small>{entry.error}</small>}</td>
     <td>{entry.test_metrics ? `F1 ${entry.test_metrics.f1.toFixed(3)} · PR-AUC ${entry.test_metrics.average_precision_pr_auc.toFixed(3)}` : 'Нет test-метрик'}</td>
     <td><details><summary>Происхождение</summary><p>{entry.dataset ?? 'Источник не указан'}</p><p>Манифест: {entry.manifest}</p><p>SHA-256: {entry.manifest_sha256 ?? '—'}</p>
@@ -94,7 +95,7 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
     <p className="ml-note">Метрики получены из сохранённых артефактов соответствующих датасетов. Демо-транзакции в журнале оценивает отдельный Rule Engine.</p>
     <div className="ml-grid"><ModelCard title="PaySim · синтетические переводы" detail={status?.paysim} error={status?.artifact_errors?.paysim} /><ModelCard title="IEEE-CIS · онлайн-платежи" detail={status?.ieee_cis} error={status?.artifact_errors?.ieee_cis} /><ModelCard title="BAF Base · синтетические заявки" detail={status?.baf_base} error={status?.artifact_errors?.baf_base} /><ModelCard title="IBM AML · синтетические операции" detail={status?.ibm_aml} error={status?.artifact_errors?.ibm_aml} /><UnifiedCard detail={status?.unified_mtl} error={status?.artifact_errors?.unified_mtl} /></div>
     <ModelComparison status={status} />
-    <section className="panel ml-card"><h2>Model Registry</h2><p>Активные артефакты и история экспериментов. Контрольные суммы подтверждают идентичность файлов, а метрики взяты из сохранённых отчётов.</p>
+    <section className="panel ml-card"><h2>Model Registry</h2><p>Активные артефакты, кандидаты и архивные отчёты. Контрольные суммы подтверждают идентичность файлов, а метрики взяты из сохранённых отчётов. Кандидат не становится рабочей моделью автоматически.</p>
       {registryError && <p className="ml-error">Ошибка реестра: {registryError}</p>}
       {registry && <><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Test</th><th>Аудит</th></tr></thead><tbody>
         {registry.entries.filter(entry => entry.active_for).map(entry => <RegistryRow key={`${entry.active_for}-${entry.manifest}`} entry={entry} />)}

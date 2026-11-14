@@ -21,10 +21,11 @@ def test_registry_active_archive_and_missing_component(tmp_path):
     (archived / 'trial.metrics.json').write_text(json.dumps(report), encoding='utf-8')
     result = list_registry({'paysim': manifest, 'ibm_aml': root / 'absent.metrics.json'}, root)
     active = next(entry for entry in result['entries'] if entry['active_for'] == 'paysim')
-    assert active['state'] == 'installed' and len(active['components']) == 2
+    assert active['state'] == 'installed' and active['lifecycle'] == 'active' and len(active['components']) == 2
     assert active['test_metrics']['f1'] == 0.2
     assert next(entry for entry in result['entries'] if entry['active_for'] == 'ibm_aml')['state'] == 'invalid'
-    assert next(entry for entry in result['entries'] if entry['manifest'] == 'trial.metrics.json')['state'] == 'report_only'
+    candidate = next(entry for entry in result['entries'] if entry['manifest'] == 'trial.metrics.json')
+    assert candidate['state'] == 'report_only' and candidate['lifecycle'] == 'candidate'
 
 
 def test_registry_rejects_leaky_schema_and_protects_api(client, auth, tmp_path):
@@ -38,7 +39,7 @@ def test_registry_rejects_leaky_schema_and_protects_api(client, auth, tmp_path):
     assert client.get('/api/v1/model/registry').status_code == 401
     response = client.get('/api/v1/model/registry', headers=auth)
     assert response.status_code == 200
-    assert response.json()['registry_version'] == 1
+    assert response.json()['registry_version'] == 2
 
 
 def test_registry_accepts_unified_manifest_only_with_four_clean_task_schemas(tmp_path):
@@ -57,3 +58,13 @@ def test_registry_accepts_unified_manifest_only_with_four_clean_task_schemas(tmp
     tasks['paysim']['feature_schema']['all'] = ['nameOrig']
     manifest.write_text(json.dumps(report), encoding='utf-8')
     assert list_registry({'izqar_unified_mtl': manifest}, root)['entries'][0]['state'] == 'invalid'
+
+
+def test_registry_marks_nonactive_final_reports_as_archived(tmp_path):
+    root = tmp_path / 'models'; root.mkdir()
+    report = {'format_version': 2, 'model_kind': 'paysim', 'model_version': 'final-but-not-promoted',
+              'features': ['amount'], 'threshold': .5, 'experiment': {'mode': 'final'}}
+    manifest = root / 'former.metrics.json'
+    manifest.write_text(json.dumps(report), encoding='utf-8')
+    entry = list_registry({}, root)['entries'][0]
+    assert entry['state'] == 'report_only' and entry['lifecycle'] == 'archived'

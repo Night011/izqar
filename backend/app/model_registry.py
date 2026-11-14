@@ -40,9 +40,9 @@ def _components(report_path: Path, report: dict) -> list[Path]:
     return []
 
 
-def _entry(report_path: Path, active_kind: str | None) -> dict:
+def _entry(report_path: Path, active_kind: str | None, lifecycle: str) -> dict:
     result = {'manifest': report_path.name, 'active_for': active_kind,
-              'state': 'invalid', 'error': None}
+              'state': 'invalid', 'lifecycle': lifecycle, 'error': None}
     try:
         if not report_path.is_file():
             raise ValueError('metadata missing')
@@ -92,12 +92,41 @@ def _entry(report_path: Path, active_kind: str | None) -> dict:
                        'validation_metrics': report.get('validation_metrics') or report.get('tasks'),
                        'test_metrics': report.get('test_metrics'),
                        'manifest_sha256': _sha256(report_path), 'components': components,
+                       # Integrity state describes the files.  Lifecycle deliberately describes
+                       # whether this report is serving traffic: a complete candidate is never
+                       # promoted simply because its component files happen to be present.
                        'state': 'installed' if len(components) == len(files) else 'report_only'})
         if len(components) != len(files):
             result['error'] = 'model component missing; report alone is not an installed model'
     except (OSError, ValueError, TypeError, KeyError) as exc:
         result['error'] = str(exc)
     return result
+
+
+def _lifecycle(report_path: Path, report_root: Path, active_kind: str | None) -> str:
+    """Classify deployment intent without loading a model payload.
+
+    Reports written by experiment mode go to ``models/experiments`` and contain
+    an experiment mode record.  Either marker is enough to keep the entry out of
+    the serving set.  A final report outside that directory remains an archived
+    report until an operator explicitly configures it as an active model path.
+    """
+    if active_kind is not None:
+        return 'active'
+    try:
+        report = json.loads(report_path.read_text(encoding='utf-8'))
+        mode = report.get('run_mode')
+        if not isinstance(mode, str):
+            experiment = report.get('experiment')
+            mode = experiment.get('mode') if isinstance(experiment, dict) else None
+        relative_parts = report_path.resolve().relative_to(report_root.resolve()).parts
+        if mode == 'experiment' or 'experiments' in relative_parts:
+            return 'candidate'
+    except (OSError, ValueError, TypeError):
+        # _entry will expose the metadata error.  Treat unknown archive intent
+        # conservatively: it must never become a serving model.
+        pass
+    return 'archived'
 
 
 def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
@@ -107,7 +136,7 @@ def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
     for kind, path in active_paths.items():
         report_path = _report_path(path)
         seen.add(report_path.resolve())
-        entries.append(_entry(report_path, kind))
+        entries.append(_entry(report_path, kind, _lifecycle(report_path, model_root, kind)))
     if model_root.is_dir():
         root = model_root.resolve()
         for report_path in sorted(model_root.rglob('*.metrics.json')):
@@ -115,10 +144,10 @@ def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
             if resolved in seen or not resolved.is_relative_to(root) or len(entries) >= MAX_ENTRIES:
                 continue
             seen.add(resolved)
-            entries.append(_entry(report_path, None))
+            entries.append(_entry(report_path, None, _lifecycle(report_path, root, None)))
     active = [item for item in entries if item['active_for'] is not None]
     history = [item for item in entries if item['active_for'] is None]
     history.sort(key=lambda item: (str(item.get('trained_at_utc') or ''), item['manifest']),
                  reverse=True)
-    return {'registry_version': 1, 'entries': active + history,
-            'note': 'Metrics are read from trusted local training reports; checksums verify file identity, not model quality.'}
+    return {'registry_version': 2, 'entries': active + history,
+            'note': 'Metrics are read from trusted local training reports; checksums verify file identity, not model quality. Candidate and archived reports never receive serving traffic until explicitly configured as active.'}
