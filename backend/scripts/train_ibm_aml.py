@@ -28,6 +28,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
+from ibm_history_features import CausalAccountHistory, CausalHistoryStream, HISTORY_FEATURES
 from train_ieee import file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
 
 EXPECTED_HEADER = [
@@ -37,6 +38,7 @@ EXPECTED_HEADER = [
 ]
 READ_COLUMNS = ['Timestamp', 'From Bank', 'To Bank', 'Amount Paid',
                 'Receiving Currency', 'Payment Currency', 'Payment Format', 'Is Laundering']
+HISTORY_READ_COLUMNS = READ_COLUMNS + ['Account', 'Account.1']
 NUMERIC = ['amount_paid', 'log_amount_paid', 'same_bank', 'same_currency', 'hour', 'weekday']
 CATEGORICAL = ['receiving_currency', 'payment_currency', 'payment_format']
 FEATURES = NUMERIC + CATEGORICAL
@@ -52,11 +54,13 @@ def validate_file(path: Path) -> None:
         raise ValueError(f'Unexpected IBM AML header: {header!r}')
 
 
-def iter_raw(path: Path):
+def iter_raw(path: Path, include_accounts: bool = False):
     dtypes = {'From Bank': 'string', 'To Bank': 'string', 'Amount Paid': 'float32',
               'Receiving Currency': 'string', 'Payment Currency': 'string',
               'Payment Format': 'string', 'Is Laundering': 'int8'}
-    yield from pd.read_csv(path, usecols=READ_COLUMNS, dtype=dtypes,
+    if include_accounts:
+        dtypes.update({'Account': 'string', 'Account.1': 'string'})
+    yield from pd.read_csv(path, usecols=HISTORY_READ_COLUMNS if include_accounts else READ_COLUMNS, dtype=dtypes,
                            chunksize=CHUNK_SIZE, low_memory=False)
 
 
@@ -88,7 +92,7 @@ def time_boundaries(path: Path) -> tuple[pd.Timestamp, pd.Timestamp, int, int]:
     return train_cut, valid_cut, len(ordered), train_available
 
 
-def make_features(chunk: pd.DataFrame, times: pd.Series) -> pd.DataFrame:
+def make_features(chunk: pd.DataFrame, times: pd.Series, history_features: pd.DataFrame | None = None) -> pd.DataFrame:
     if not chunk['Is Laundering'].isin([0, 1]).all():
         raise ValueError('Is Laundering must be binary')
     if not np.isfinite(chunk['Amount Paid'].to_numpy()).all() or (chunk['Amount Paid'] < 0).any():
@@ -96,7 +100,7 @@ def make_features(chunk: pd.DataFrame, times: pd.Series) -> pd.DataFrame:
     if chunk['From Bank'].isna().any() or chunk['To Bank'].isna().any():
         raise ValueError('Bank identifiers must be present to compute same_bank')
     amount = chunk['Amount Paid'].to_numpy(dtype='float32')
-    return pd.DataFrame({
+    features = pd.DataFrame({
         'amount_paid': amount,
         'log_amount_paid': np.log1p(amount).astype('float32'),
         'same_bank': chunk['From Bank'].eq(chunk['To Bank']).fillna(False).to_numpy(dtype='float32'),
@@ -107,15 +111,27 @@ def make_features(chunk: pd.DataFrame, times: pd.Series) -> pd.DataFrame:
         'payment_currency': chunk['Payment Currency'].astype('string').fillna('__missing__').to_numpy(),
         'payment_format': chunk['Payment Format'].astype('string').fillna('__missing__').to_numpy(),
     })
+    if history_features is not None:
+        if len(history_features) != len(features) or list(history_features.columns) != HISTORY_FEATURES:
+            raise ValueError('invalid causal history feature frame')
+        features = pd.concat([features.reset_index(drop=True), history_features.reset_index(drop=True)], axis=1)
+    return features
 
 
 def load_splits(path: Path, train_cut: pd.Timestamp, valid_cut: pd.Timestamp,
-                train_available: int, max_train_rows: int | None, include_test: bool):
+                train_available: int, max_train_rows: int | None, include_test: bool,
+                feature_set: str = 'static_v1', history_max_accounts: int = 500_000):
+    if feature_set not in {'static_v1', 'causal_history_v1'}:
+        raise ValueError('feature_set must be static_v1 or causal_history_v1')
     parts: dict[str, list[pd.DataFrame]] = {key: [] for key in ('train', 'validation', 'test')}
     labels: dict[str, list[np.ndarray]] = {key: [] for key in parts}
     counts = {key: 0 for key in parts}
     train_seen = 0
-    for chunk in iter_raw(path):
+    history_stream = (CausalHistoryStream(CausalAccountHistory(history_max_accounts))
+                      if feature_set == 'causal_history_v1' else None)
+
+    def consume(chunk: pd.DataFrame, history_features: pd.DataFrame | None = None):
+        nonlocal train_seen
         times = parse_time(chunk['Timestamp'])
         masks = {'train': (times < train_cut).to_numpy(),
                  'validation': ((times >= train_cut) & (times < valid_cut)).to_numpy(),
@@ -133,10 +149,22 @@ def load_splits(path: Path, train_cut: pd.Timestamp, valid_cut: pd.Timestamp,
                 selected = selected[keep]
             if len(selected):
                 rows = chunk.iloc[selected]
-                parts[name].append(make_features(rows, times.iloc[selected]))
+                selected_history = history_features.iloc[selected] if history_features is not None else None
+                parts[name].append(make_features(rows, times.iloc[selected], selected_history))
                 labels[name].append(rows['Is Laundering'].to_numpy(dtype='int8'))
             if name == 'train':
                 train_seen += count
+    for chunk in iter_raw(path, include_accounts=history_stream is not None):
+        if history_stream is None:
+            consume(chunk)
+        else:
+            ready, historical = history_stream.feed(chunk)
+            if not ready.empty:
+                consume(ready, historical)
+    if history_stream is not None:
+        ready, historical = history_stream.finish()
+        if not ready.empty:
+            consume(ready, historical)
     result = {}
     for name in parts:
         if name == 'test' and not include_test:
@@ -159,30 +187,38 @@ def precision_at_k(y: np.ndarray, scores: np.ndarray, k: int = 1000) -> float:
 
 
 def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators: int = 180,
-          max_train_rows: int | None = 500_000, max_false_alerts_per_10000: float | None = 100):
+          max_train_rows: int | None = 500_000, max_false_alerts_per_10000: float | None = 100,
+          feature_set: str = 'static_v1', history_max_accounts: int = 500_000):
     if mode not in {'experiment', 'final'} or n_estimators < 1:
         raise ValueError('Use experiment/final mode and positive estimators')
     if max_train_rows is not None and max_train_rows < 100:
         raise ValueError('max_train_rows must be at least 100')
+    if feature_set not in {'static_v1', 'causal_history_v1'}:
+        raise ValueError('feature_set must be static_v1 or causal_history_v1')
+    if feature_set != 'static_v1' and mode == 'final':
+        raise ValueError('causal history is a validation-only candidate; final mode is deliberately blocked')
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError('Output exists; preserve prior IBM AML experiments')
     validate_file(data_path)
     train_cut, valid_cut, total, train_available = time_boundaries(data_path)
     split, counts = load_splits(data_path, train_cut, valid_cut, train_available,
-                                max_train_rows, mode == 'final')
+                                max_train_rows, mode == 'final', feature_set, history_max_accounts)
     x_train, y_train = split['train']
     x_valid, y_valid = split['validation']
+    numeric_features = NUMERIC + (HISTORY_FEATURES if feature_set == 'causal_history_v1' else [])
+    features = numeric_features + CATEGORICAL
     experiment, started = start_experiment(
-        dataset='IBM AML HI-Small', algorithm='XGBoost', features=FEATURES,
+        dataset='IBM AML HI-Small', algorithm='XGBoost', features=features,
         split_method='timestamp 70/15/15; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
-                         'max_depth': 4, 'learning_rate': .06, 'feature_set': 'static_v1'},
+                         'max_depth': 4, 'learning_rate': .06, 'feature_set': feature_set,
+                         'history_max_accounts': history_max_accounts if feature_set != 'static_v1' else None},
     )
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median'))])
     categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
                             ('onehot', OneHotEncoder(handle_unknown='ignore'))])
-    pre = ColumnTransformer([('numeric', numeric, NUMERIC), ('categorical', categorical, CATEGORICAL)])
+    pre = ColumnTransformer([('numeric', numeric, numeric_features), ('categorical', categorical, CATEGORICAL)])
     positive = int(y_train.sum())
     model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.06,
                           subsample=.85, colsample_bytree=.85, reg_lambda=4,
@@ -206,7 +242,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         'data_files': [file_provenance(data_path)],
         'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__,
                              'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
-        'features': FEATURES, 'numerical_features': NUMERIC, 'categorical_features': CATEGORICAL,
+        'features': features, 'numerical_features': numeric_features, 'categorical_features': CATEGORICAL,
         'excluded_for_leakage': ['Is Laundering', 'Account', 'Account.1', 'Amount Received',
                                  'raw bank identifiers', 'future transaction history'],
         'split_method': 'timestamps below 70th percentile train, next 15% validation, last 15% final test; ties remain in later period',
@@ -231,7 +267,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         baseline_index = np.linspace(0, len(y_train) - 1, baseline_size, dtype=np.int64)
         baseline_pre = ColumnTransformer([
             ('numeric', Pipeline([('imputer', SimpleImputer(strategy='median')),
-                                  ('scale', StandardScaler(with_mean=False))]), NUMERIC),
+                                  ('scale', StandardScaler(with_mean=False))]), numeric_features),
             ('categorical', Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
                                       ('onehot', OneHotEncoder(handle_unknown='ignore'))]), CATEGORICAL),
         ])
@@ -265,9 +301,12 @@ def main() -> None:
     parser.add_argument('--max-train-rows', type=int, default=500_000)
     parser.add_argument('--full-train', action='store_true', help='Explicitly fit all early-period rows')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100)
+    parser.add_argument('--feature-set', choices=['static_v1', 'causal_history_v1'], default='static_v1')
+    parser.add_argument('--history-max-accounts', type=int, default=500_000)
     args = parser.parse_args()
     train(args.data, args.output, args.mode, args.estimators,
-          None if args.full_train else args.max_train_rows, args.max_false_alerts_per_10000)
+          None if args.full_train else args.max_train_rows, args.max_false_alerts_per_10000,
+          args.feature_set, args.history_max_accounts)
 
 
 if __name__ == '__main__':

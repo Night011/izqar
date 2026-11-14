@@ -43,11 +43,12 @@ cd backend
 .\.venv\Scripts\python.exe scripts\train_ieee.py --data-dir <ieee-dir> --mode experiment --feature-set extended_cv --max-train-rows 300000 --output models\experiments\ieee_candidate_01.joblib
 .\.venv\Scripts\python.exe scripts\train_baf.py --data <Base.csv> --mode experiment --max-train-rows 500000 --output models\experiments\baf_candidate_01.joblib --max-false-alerts-per-10000 100
 .\.venv\Scripts\python.exe scripts\train_ibm_aml.py --data <HI-Small_Trans.csv> --mode experiment --max-train-rows 500000 --output models\experiments\ibm_candidate_01.joblib --max-false-alerts-per-10000 100
+.\.venv\Scripts\python.exe scripts\train_ibm_aml.py --data <HI-Small_Trans.csv> --mode experiment --feature-set causal_history_v1 --history-max-accounts 500000 --max-train-rows 500000 --output models\experiments\ibm_history_candidate_01.joblib --max-false-alerts-per-10000 100
 ```
 
 Не запускайте `--mode final` для настройки этих старых holdout. Для Unified остаётся отдельная sealed one-time final процедура из [NEXT_STEPS.md](NEXT_STEPS.md).
 
-`scripts/ibm_history_features.py` уже реализует и unit-test проверяет feature builder для prior outgoing/incoming counts, amounts и time-since-activity. Его `CausalHistoryStream` удерживает последнюю timestamp-группу между CSV chunks, поэтому одинаковое время не даёт операциям увидеть друг друга. Account остаётся только ключом истории. Он ещё **не подключён к IBM active/candidate trainer**: это намеренно следующий проверяемый этап, чтобы не выдать непроверенный historical candidate за улучшение.
+`scripts/ibm_history_features.py` реализует prior outgoing/incoming counts, amounts и time-since-activity. Его `CausalHistoryStream` удерживает последнюю timestamp-группу между CSV chunks, поэтому одинаковое время не даёт операциям увидеть друг друга. Account остаётся только ключом истории. `train_ibm_aml.py --feature-set causal_history_v1` подключает эти признаки **только** к experiment candidate и блокирует `--mode final`; активный IBM артефакт не изменяется.
 
 ## Интерпретация результатов
 

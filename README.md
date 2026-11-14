@@ -161,7 +161,7 @@ cd ..\frontend
 npm run build
 ```
 
-Последняя локальная проверка: **55 backend tests passed**; React production build прошёл. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
+Последняя локальная проверка: **56 backend tests passed**; React production build прошёл. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
 
 ## API и данные
 

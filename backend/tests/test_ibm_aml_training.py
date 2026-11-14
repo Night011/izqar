@@ -1,6 +1,7 @@
 """Small synthetic fixtures exercise IBM AML chronology and schema, not real quality."""
 import csv
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 
@@ -8,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_ibm_aml import EXPECTED_HEADER, FEATURES, validate_file, time_boundaries, load_splits, train  # noqa: E402
+from ibm_history_features import HISTORY_FEATURES  # noqa: E402
 from export_portable_model import export  # noqa: E402
 from install_model_bundle import install  # noqa: E402
 
@@ -20,6 +22,18 @@ def make_csv(path: Path):
             day = i // 50 + 1
             writer.writerow([f'2025/01/{day:02d} {i % 24:02d}:{i % 60:02d}', '001', f'A{i}',
                              '002' if i % 2 else '001', f'B{i}', 100 + i,
+                             'EUR' if i % 3 else 'USD', float(i % 30 + 1),
+                             'USD', 'Wire' if i % 2 else 'ACH', int(i % 13 == 0)])
+
+
+def make_ordered_csv(path: Path):
+    with path.open('w', newline='', encoding='utf-8') as stream:
+        writer = csv.writer(stream); writer.writerow(EXPECTED_HEADER)
+        start = datetime(2025, 1, 1)
+        for i in range(400):
+            at = start + timedelta(minutes=i)
+            writer.writerow([at.strftime('%Y-%m-%d %H:%M:%S'), '001', f'A{i % 20}',
+                             '002' if i % 2 else '001', f'B{i % 15}', 100 + i,
                              'EUR' if i % 3 else 'USD', float(i % 30 + 1),
                              'USD', 'Wire' if i % 2 else 'ACH', int(i % 13 == 0)])
 
@@ -73,3 +87,18 @@ def test_ibm_aml_rejects_unexpected_header(tmp_path):
     path.write_text(text, encoding='utf-8')
     with pytest.raises(ValueError, match='header'):
         validate_file(path)
+
+
+def test_ibm_causal_history_candidate_is_experiment_only(tmp_path):
+    data_dir = tmp_path / 'ordered'; data_dir.mkdir()
+    path = data_dir / 'HI-Small_Trans.csv'; make_ordered_csv(path)
+    candidate = tmp_path / 'history_candidate.joblib'
+    report = train(path, candidate, mode='experiment', n_estimators=8, max_train_rows=100,
+                   max_false_alerts_per_10000=None, feature_set='causal_history_v1', history_max_accounts=100)
+    assert not candidate.exists()
+    assert report['test_metrics'] is None
+    assert set(HISTORY_FEATURES) <= set(report['features'])
+    assert not {'Account', 'Account.1'} & set(report['features'])
+    with pytest.raises(ValueError, match='validation-only candidate'):
+        train(path, tmp_path / 'history_final.joblib', mode='final', n_estimators=8, max_train_rows=100,
+              max_false_alerts_per_10000=None, feature_set='causal_history_v1')
