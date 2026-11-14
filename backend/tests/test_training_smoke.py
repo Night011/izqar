@@ -27,6 +27,12 @@ def test_paysim_engineered_final_requires_explicit_freeze():
     validate_paysim_run_configuration('final', 1.0, 'pre_transaction_v2', 'pre_transaction_v2')
 
 
+def test_ieee_extended_candidate_cannot_consume_inspected_final_holdout(tmp_path):
+    with pytest.raises(ValueError, match='validation-only'):
+        train_ieee(tmp_path / 'not-read', tmp_path / 'final.joblib', n_estimators=8,
+                   mode='final', feature_set='extended_cv')
+
+
 def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeypatch):
     rows = 300
     paysim = pd.DataFrame({
