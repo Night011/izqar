@@ -46,7 +46,29 @@ def test_unified_missing_or_valid_cpu_artifact(client, auth, tmp_path, monkeypat
                            json={'features': {'amount': 10}}).status_code == 422
         assert client.post('/api/v1/unified/paysim/predict', headers=auth,
                            json={'features': {'isFraud': 1}}).status_code == 422
+        from app.ml import _sha256_file
+        metric = {'precision': .1, 'recall': .2, 'f1': .133333, 'average_precision_pr_auc': .12,
+                  'roc_auc': .55, 'confusion_matrix_tn_fp_fn_tp': [8, 1, 2, 1],
+                  'false_positive_rate': .111111, 'false_negative_rate': .666667,
+                  'false_alerts_per_10000_operations': 833.333, 'cases': 12, 'positive_cases': 3}
+        final = {'format_version': 1, 'evaluation_type': 'one_time_sealed_final_test',
+                 'model_version': 'izqar-unified-mtl-test',
+                 'manifest_sha256': _sha256_file(manifest),
+                 'weights_sha256': _sha256_file(tmp_path / 'unified_weights.npz'),
+                 'preprocessors_sha256': _sha256_file(tmp_path / 'unified_preprocessors.joblib'),
+                 'tasks': {task: {'threshold_from_validation': .5, 'final_test_metrics': metric} for task in TASKS}}
+        (tmp_path / 'unified.final_test.json').write_text(json.dumps(final), encoding='utf-8')
+        ml.load_unified_model.cache_clear()
         status = client.get('/api/v1/model/status', headers=auth)
         assert status.status_code == 200
         assert status.json()['unified_mtl']['task_schemas'] == {task: ['amount'] for task in TASKS}
+        assert status.json()['unified_mtl']['final_evaluation_available'] is True
+        assert status.json()['unified_mtl']['tasks']['paysim']['final_test_metrics']['cases'] == 12
+        (tmp_path / 'unified.final_test.json').write_text('{}', encoding='utf-8')
+        ml.load_unified_model.cache_clear()
+        ignored = client.get('/api/v1/model/status', headers=auth).json()['unified_mtl']
+        assert ignored['final_evaluation_available'] is False
+        assert ignored['final_evaluation_error']
+        assert client.post('/api/v1/unified/paysim/predict', headers=auth,
+                           json={'features': {'amount': 10}}).status_code == 200
     ml.load_unified_model.cache_clear()

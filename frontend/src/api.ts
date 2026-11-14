@@ -39,8 +39,10 @@ export interface ModelStatus {
 }
 export interface UnifiedDetail {
   model_version: string; experimental: true; score_kind: string;
-  tasks: Record<string, { threshold: number; validation_metrics: TestMetrics }>;
+  tasks: Record<string, { threshold: number; validation_metrics: TestMetrics; final_test_metrics?: TestMetrics }>;
   task_schemas: Record<string, string[]>;
+  final_evaluation_available: boolean;
+  final_evaluation_error: string | null;
 }
 export interface TestMetrics {
   precision: number; recall: number; f1: number; average_precision_pr_auc: number; roc_auc: number;

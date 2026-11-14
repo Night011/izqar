@@ -223,17 +223,26 @@ def model_status():
         unified, unified_error = None, str(exc)
     else:
         unified_error = None
+    unified_summary = None
+    if unified:
+        tasks = {task: dict(item) for task, item in unified['report']['tasks'].items()}
+        if unified['final_evaluation']:
+            for task, item in unified['final_evaluation']['tasks'].items():
+                tasks[task]['final_test_metrics'] = item['final_test_metrics']
+        unified_summary = {'model_version': unified['report']['model_version'], 'tasks': tasks,
+                           # Expose the serving schema, not labels or preprocessing internals.  The
+                           # React console needs it to construct an exact, validated request for a
+                           # selected Unified task rather than guessing a cross-dataset payload.
+                           'task_schemas': {task: schema['all'] for task, schema in unified['schema'].items()},
+                           'score_kind': 'uncalibrated_ml_score', 'experimental': True,
+                           'final_evaluation_available': bool(unified['final_evaluation']),
+                           'final_evaluation_error': unified['final_evaluation_error']}
     return {'ready': bool(artifact or paysim or baf or ibm_aml), 'mode': 'separate_models',
             'ieee_cis': summary(artifact),
             'paysim': summary(paysim),
             'baf_base': summary(baf),
             'ibm_aml': summary(ibm_aml),
-            'unified_mtl': ({'model_version': unified['report']['model_version'], 'tasks': unified['report']['tasks'],
-                             # Expose the serving schema, not labels or preprocessing internals.  The
-                             # React console needs it to construct an exact, validated request for a
-                             # selected Unified task rather than guessing a cross-dataset payload.
-                             'task_schemas': {task: schema['all'] for task, schema in unified['schema'].items()},
-                             'score_kind': 'uncalibrated_ml_score', 'experimental': True} if unified else None),
+            'unified_mtl': unified_summary,
             'message': 'No trained ML artifacts available; demo rules remain available.' if not (artifact or paysim or baf or ibm_aml) and not (ieee_error or paysim_error or baf_error or ibm_aml_error) else None,
             'artifact_errors': {'ieee_cis': ieee_error, 'paysim': paysim_error, 'baf_base': baf_error, 'ibm_aml': ibm_aml_error, 'unified_mtl': unified_error}}
 

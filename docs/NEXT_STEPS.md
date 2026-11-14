@@ -31,6 +31,8 @@ python backend/scripts/train_unified.py --paysim <PaySim.csv> --ieee-dir <ieee-d
 
 Команда не выполняет обучение: она применяет неизменённые веса, preprocessing и пороги, выбранные на validation, к закрытым test-окнам и создаёт `unified.final_test.json`. Повторный запуск в том же output-каталоге намеренно завершается ошибкой; не обходите эту защиту.
 
+После установки артефактов `GET /api/v1/model/status` показывает `unified_mtl.final_evaluation_available: true` только если SHA-256 отчёта совпадают с установленными компонентами. В противном случае final-метрики не отображаются, а Unified-инференс остаётся доступен по проверенным весам.
+
 ## Локальные проверки и запуск
 
 ```powershell

@@ -1,11 +1,50 @@
 """Trusted, separately versioned fraud models and strict inference schemas."""
 from functools import lru_cache
+import hashlib
 from pathlib import Path
 import json
 import joblib
 import sklearn
 from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH
 from .unified_network import TASKS as UNIFIED_TASKS, UnifiedNetwork
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_unified_final_evaluation(path: Path, report: dict, weights: Path, preprocessors: Path):
+    """Read an optional final report only when it matches the serving export."""
+    final_path = path.with_name(path.name.removesuffix('.metrics.json') + '.final_test.json')
+    if not final_path.is_file():
+        return None, None
+    try:
+        final = json.loads(final_path.read_text(encoding='utf-8'))
+        if (final.get('format_version') != 1 or final.get('evaluation_type') != 'one_time_sealed_final_test'
+                or final.get('model_version') != report.get('model_version')
+                or final.get('manifest_sha256') != _sha256_file(path)
+                or final.get('weights_sha256') != _sha256_file(weights)
+                or final.get('preprocessors_sha256') != _sha256_file(preprocessors)):
+            raise ValueError('provenance does not match the installed export')
+        tasks = final.get('tasks')
+        if not isinstance(tasks, dict) or set(tasks) != set(UNIFIED_TASKS):
+            raise ValueError('missing final metrics for one or more tasks')
+        for task in UNIFIED_TASKS:
+            item = tasks[task]
+            threshold = item.get('threshold_from_validation') if isinstance(item, dict) else None
+            metrics = item.get('final_test_metrics') if isinstance(item, dict) else None
+            if (not isinstance(metrics, dict) or threshold != report['tasks'][task].get('threshold')
+                    or not {'precision', 'recall', 'f1', 'average_precision_pr_auc', 'roc_auc',
+                            'confusion_matrix_tn_fp_fn_tp', 'false_positive_rate', 'false_negative_rate',
+                            'false_alerts_per_10000_operations', 'cases'}.issubset(metrics)):
+                raise ValueError(f'invalid final metrics for {task}')
+        return final, None
+    except (OSError, ValueError, TypeError) as exc:
+        return None, f'Final evaluation report was ignored: {type(exc).__name__}'
 
 
 def _load_artifact(path: Path, expected_kind: str):
@@ -106,7 +145,9 @@ def load_unified_model():
         if set(preprocessors) != set(UNIFIED_TASKS):
             raise ValueError('preprocessor task mismatch')
         network = UnifiedNetwork.from_npz(weights, dimensions)
-        return {'report': report, 'network': network, 'preprocessors': preprocessors, 'schema': schema}
+        final_evaluation, final_evaluation_error = _load_unified_final_evaluation(path, report, weights, preprocessors_path)
+        return {'report': report, 'network': network, 'preprocessors': preprocessors, 'schema': schema,
+                'final_evaluation': final_evaluation, 'final_evaluation_error': final_evaluation_error}
     except Exception as exc:
         raise RuntimeError(f'Unable to load unified model artifact ({type(exc).__name__})') from exc
 
