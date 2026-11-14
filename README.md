@@ -161,7 +161,7 @@ cd ..\frontend
 npm run build
 ```
 
-Последняя локальная проверка: **59 backend tests passed**; React production build прошёл. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
+Последняя локальная проверка: **60 backend tests passed**; React production build прошёл. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
 
 ## API и данные
 
@@ -186,7 +186,7 @@ npm run build
 - IEEE-CIS: transaction/identity merge по `TransactionID` с one-to-one проверкой; `TransactionDT` — время split, не ML-признак.
 - BAF и IBM AML имеют собственные схемы и временные разбиения; их метки не считаются эквивалентными fraud-платежу.
 - Imputation и encoding fit только на train; thresholds фиксируются по validation. Test не выбирает параметры.
-- Ноутбуки: [PaySim](notebooks/paysim_kaggle.ipynb), [IEEE-CIS](notebooks/ieee_cis_kaggle.ipynb), [BAF](notebooks/baf_kaggle.ipynb), [IBM AML](notebooks/ibm_aml_kaggle.ipynb), [Unified](notebooks/unified_intelligence_kaggle.ipynb).
+- Ноутбуки: [PaySim](notebooks/paysim_kaggle.ipynb), [PaySim validation candidate](notebooks/paysim_recall_candidate_kaggle.ipynb), [IEEE-CIS](notebooks/ieee_cis_kaggle.ipynb), [BAF](notebooks/baf_kaggle.ipynb), [IBM AML](notebooks/ibm_aml_kaggle.ipynb), [Unified](notebooks/unified_intelligence_kaggle.ipynb).
 
 ## Технологии
 

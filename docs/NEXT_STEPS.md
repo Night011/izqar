@@ -61,6 +61,8 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 Для PaySim candidate сравнивайте `validation_type_slices.TRANSFER/CASH_OUT` и `validation_robustness` вместе с общими F1/PR-AUC/FP. Нулевой или отрицательный эффект в одном synthetic stress scenario не объясняет будущий дрейф и не допускает настройки на старом test.
 
+Для первого controlled recall candidate подготовлен [ноутбук](../notebooks/paysim_recall_candidate_kaggle.ipynb). Он фиксирует `positive_weight_multiplier=1.25`, запускает только `--mode experiment` на полном PaySim и экспортирует **report-only** ZIP. Ноутбук проверяет точный SHA Git commit до обучения; перед запуском feature-ветка с этим commit должна быть явно опубликована или текущий код должен быть загружен в Kaggle эквивалентным проверяемым способом. Не обходите эту проверку и не устанавливайте report-only ZIP как модель API.
+
 ## Локальные проверки и запуск
 
 ```powershell
