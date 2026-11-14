@@ -65,6 +65,8 @@ export interface ModelDetail {
 export interface ModelPrediction {
   risk_score: number; threshold: number; flagged: boolean; source: string;
   model_version: string; score_kind: string; warning: string;
+  explanation_method?: string;
+  explanation?: { feature: string; log_odds_contribution: number; direction: 'increases_model_score' | 'decreases_model_score' }[];
 }
 export interface RegistryEntry {
   manifest: string; active_for: string | null; state: 'installed' | 'report_only' | 'invalid'; error?: string | null;

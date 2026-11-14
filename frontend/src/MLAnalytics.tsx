@@ -105,7 +105,7 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
       <textarea aria-label="JSON признаков" spellCheck={false} value={input} onChange={e => setInput(e.target.value)} rows={9} />
       <button className="primary" disabled={selectedFeatures.length === 0 || busy} onClick={predict}>{busy ? 'Оцениваем…' : 'Получить оценку модели'}</button>
       {error && <p className="ml-error">{error}</p>}
-      {result && <div className="ml-result"><strong>{result.flagged ? 'Выше порога' : 'Ниже порога'} · скор {result.risk_score.toFixed(2)} / 100</strong><span>{result.source} · {result.model_version} · порог {result.threshold.toFixed(4)}</span><p>{result.warning}</p></div>}
+      {result && <div className="ml-result"><strong>{result.flagged ? 'Выше порога' : 'Ниже порога'} · скор {result.risk_score.toFixed(2)} / 100</strong><span>{result.source} · {result.model_version} · порог {result.threshold.toFixed(4)}</span><p>{result.warning}</p>{result.explanation && result.explanation.length > 0 && <details><summary>Локальные факторы модели</summary><p>TreeSHAP-вклады в log-odds: это объяснение модели, а не причинное доказательство.</p><ol>{result.explanation.map(item => <li key={item.feature}><strong>{item.feature}</strong>: {item.log_odds_contribution >= 0 ? '+' : ''}{item.log_odds_contribution.toFixed(4)} · {item.direction === 'increases_model_score' ? 'повышает скор' : 'снижает скор'}</li>)}</ol></details>}{result.explanation_method === 'not_available_for_experimental_shared_backbone' && <p>Локальный attribution для экспериментального общего backbone пока не валидирован; доступна только схема и агрегированные метрики.</p>}</div>}
     </section>
   </div>;
 }

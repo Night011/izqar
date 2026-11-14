@@ -1,230 +1,223 @@
 # IZQAR — Intelligent Fraud Prevention Platform
 
-**Рабочий исследовательский MVP для хакатона.** Система демонстрирует оценку риска синтетических переводов, анализ структуры связей между счетами и ручное расследование инцидентов. Отдельные скрипты обучают модели PaySim, IEEE-CIS, BAF Base и IBM AML HI-Small.
+> **Исследовательская платформа для обнаружения и расследования финансового мошенничества.** IZQAR объединяет специализированные ML-детекторы, объяснимые поведенческие правила и графовый анализ связей, чтобы аналитик видел не только скор, но и его контекст. Это не замена банковскому ядру, а проверяемый MVP комплексного антифрод-подхода.
 
-> **Не банковское ПО.** Демо-скор 0–100 рассчитан **правилами**, не является вероятностью мошенничества. IEEE-CIS не содержит полноценного графа банковских переводов. Нельзя выдавать точность на IEEE-CIS за эффективность в Казахстане или на настоящих клиентах.
+![Research MVP](https://img.shields.io/badge/status-research%20MVP-1c708a)
+![Local inference](https://img.shields.io/badge/inference-local%20CPU-2f7d8a)
+![Models](https://img.shields.io/badge/models-4%20specialized%20%2B%201%20experimental-455a9c)
 
-## Что уже реализовано
+**Ключевая идея:** подозрительная операция — повод для расследования, а не автоматическое обвинение. IZQAR помогает собрать сигналы, показать связи и сохранить решение аналитика с понятным происхождением каждой оценки.
 
-- **FastAPI** с версионированными endpoints, схемами Pydantic, проверкой API-ключа.
-- **SQLite** для быстрого локального запуска, **PostgreSQL** в Docker Compose.
-- **Rule Engine** с объяснениями оценки риска и признаками, вычисляемыми только по истории до транзакции.
-- **6 сценариев симулятора**: обычный перевод, новый получатель, серия переводов, много отправителей на один счёт, цепочка переводов и направленный цикл.
-- **Графовый анализ NetworkX** (уникальные счета/рёбра, признаки высокого fan-in/fan-out); граф сам по себе не доказывает мошенничество.
-- **Журнал операций**, статусы «подтверждено аналитиком» / «ложная тревога».
-- **Два интерфейса**: автономный веб-интерфейс без Node.js и расширенная React/TypeScript панель с Cytoscape.
-- **Четыре независимых ML-пайплайна**: PaySim, IEEE-CIS, BAF Base и IBM AML HI-Small с отдельными схемами, артефактами и endpoint'ами; XGBoost, baseline, временное разделение и порог только по validation.
-- **ML Analytics в React** показывает метрики только из установленных артефактов, отдельный инференс четырёх специализированных моделей, экспериментальный Unified Intelligence и состояние их загрузки. Журнал демо-операций по-прежнему показывает оценку Rule Engine.
-- **Pytest** для API, симуляций, авторизации и графа; GitHub Actions для тестов и сборки фронтенда.
+## Содержание
 
-## Самый быстрый запуск в Windows, без Node.js
+- [Проблема и решение](#проблема-и-решение)
+- [Что работает сейчас](#что-работает-сейчас)
+- [Модели и подтверждённые результаты](#модели-и-подтверждённые-результаты)
+- [Архитектура](#архитектура)
+- [Live Demonstration](#live-demonstration--how-izqar-works)
+- [Быстрый запуск](#быстрый-запуск)
+- [API и данные](#api-и-данные)
+- [Ограничения и roadmap](#ограничения-и-roadmap)
 
-Требуется **Python 3.11+** и доступ к PyPI для первоначальной установки зависимостей.
+## Проблема и решение
 
-1. Распакуй архив в отдельную папку, открой папку в VS Code.
-2. Открой PowerShell в корне проекта.
-3. Выполни:
+Одна внешне обычная операция может быть частью цепочки переводов, сети связанных счетов или новой схемы. При этом избыточные ложные тревоги перегружают аналитиков, а один числовой скор без объяснения редко достаточен для решения.
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\scripts\start_local.ps1
-   ```
+Современные банки уже используют ML и графовую аналитику. IZQAR исследует собственную интеграцию этих подходов: источники сигналов остаются разделёнными, их происхождение видно аналитику, а решение человека фиксируется в расследовании.
 
-Скрипт создаёт `.env` со **случайным ключом**, создаёт `.venv`, устанавливает минимальные зависимости и открывает `http://127.0.0.1:8000/demo/`.
+| Подсистема | Реальное назначение |
+|---|---|
+| **Transaction Intelligence** | Rule Engine оценивает только синтетические операции demo-симулятора и объясняет срабатывания. |
+| **Multi-Model Fraud Detection** | Четыре отдельные XGBoost-модели для разных наборов данных и схем признаков. |
+| **Unified Intelligence** | Экспериментальная multi-task сеть: четыре адаптера, общий обучаемый backbone и четыре task head. |
+| **Financial Network Analysis** | Направленные связи, fan-in/out, быстрые цепочки и циклы как leads для расследования. |
+| **Fraud Investigation** | Очередь дел, статусы, комментарии, журнал действий и server-side ML assessments. |
 
-**Где брать ключ?** Открой `.env` в корне проекта, скопируй значение `IZQAR_API_KEY` и вставь его на экране входа. Ключ хранится в `sessionStorage` только на время сессии браузера. Не публикуй скриншоты ключа и не коммить `.env`.
+Rule Engine, ML-скор и графовый индикатор **не объединяются в вымышленную «вероятность мошенничества»**. Это разные источники информации с отдельными ограничениями.
 
-`scripts/start_local.ps1` генерирует ключ, если `.env` или ключ отсутствует, пуст либо имеет шаблонное значение. Существующий нестандартный ключ короче 24 символов скрипт не перезаписывает: исправь его вручную. Проверить только конфигурацию ключа без установки зависимостей и запуска API: `powershell -ExecutionPolicy Bypass -File .\scripts\start_local.ps1 -ConfigureOnly`.
+## Что работает сейчас
 
-Если команда `py -3` отсутствует, установи Python 3 и повтори запуск либо пользуйся ручным способом ниже.
+- React + TypeScript консоль: Dashboard, операции, расследования, Network Explorer, ML Analytics и Model Registry.
+- FastAPI с локальным demo API-key, строгими схемами, лимитом тела запроса 64 KiB и CORS только для localhost по умолчанию.
+- Отдельный API-инференс для PaySim, IEEE-CIS, BAF Base, IBM AML и четырёх head Unified.
+- Проверка схем, версий, происхождения и контрольных сумм артефактов; нет модели — нет фиктивного прогноза.
+- Локальные TreeSHAP-вклады XGBoost для запроса модели: до пяти признаков без возврата введённых значений. Это объяснение модели, не причинный вывод.
+- NetworkX/Cytoscape-граф демо-переводов. Если установлен отдельный IBM AML report, браузер получает только агрегаты без идентификаторов счетов.
+- Локальный CPU-инференс и Kaggle Notebooks для ресурсоёмкого обучения без загрузки исходных CSV в Git.
 
-## Ручной локальный запуск, Linux / Windows
+## Модели и подтверждённые результаты
 
-В корне проекта создай `.env` на основе `.env.example`. **Замени** `IZQAR_API_KEY` на секрет длиной от 24 символов (генерация: `python -c "import secrets; print(secrets.token_urlsafe(32))"`).
+Каждая специализированная модель обучалась и оценивается **на своём** источнике. Поэтому сравнение строк таблицы не доказывает, что одна задача или модель «лучше» другой.
 
-Затем в терминале:
+| Модель | Назначение и источник | Отложенный test | Precision | Recall | F1 | PR-AUC | ROC-AUC | FP / FN | Ложн. тревог / 10k |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| PaySim v2 | [синтетические переводы](https://www.kaggle.com/datasets/ealaxi/paysim1) | 955 744 | 0.898085 | 0.690025 | 0.780426 | 0.833058 | 0.998380 | 314 / 1 243 | 3.285 |
+| IEEE-CIS v2 | [онлайн-платежи](https://www.kaggle.com/competitions/ieee-fraud-detection) | 88 581 | 0.526988 | 0.414856 | 0.464247 | 0.444182 | 0.875369 | 1 148 / 1 804 | 129.599 |
+| BAF Base v1 | [синтетические заявки](https://github.com/feedzai/bank-account-fraud) | 96 843 | 0.288218 | 0.207283 | 0.241141 | 0.199692 | 0.891305 | 731 / 1 132 | 75.483 |
+| IBM AML HI-Small v1 | [синтетические AML-операции](https://github.com/IBM/AML-Data) | 762 103 | 0.063125 | 0.667521 | 0.115342 | 0.101293 | 0.951370 | 15 465 / 519 | 202.925 |
 
-```bash
-cd backend
-python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# Linux/macOS: source .venv/bin/activate
-python -m pip install -r requirements-core.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+Метрики взяты из установленных манифестов `backend/models/*.metrics.json`. Порог выбирался на validation, а не по итоговому test. Уже просмотренные test-наборы нельзя повторно использовать для подбора новой конфигурации.
+
+### IZQAR Unified Intelligence — эксперимент, validation-only
+
+Unified Intelligence — не router готовых моделей. Это одна PyTorch multi-task сеть с dataset-specific preprocessing/adapters, общим backbone и независимыми head для четырёх семантически разных задач. Gradient audit подтвердил ненулевой обучающий сигнал в shared layers от всех задач.
+
+| Задача | Validation записей | F1 | PR-AUC | Статус |
+|---|---:|---:|---:|---|
+| PaySim | 75 000 | 0.050000 | 0.037139 | experimental |
+| IEEE-CIS | 75 000 | 0.265172 | 0.188936 | experimental |
+| BAF Base | 75 000 | 0.223346 | 0.137183 | experimental |
+| IBM AML | 75 000 | 0.037538 | 0.013440 | experimental |
+
+Это **не** финальная test-оценка и не доказательство превосходства над специализированными детекторами. Текущие результаты показывают, что совместное обучение само по себе не гарантирует улучшения; специализированные модели остаются основными рабочими детекторами. Методика и ограничения: [статус разработки](docs/DEVELOPMENT_STATUS.md).
+
+## Архитектура
+
+```mermaid
+flowchart LR
+    Demo[Синтетическая demo-операция] --> API[FastAPI]
+    API --> Rules[Rule Engine\nтолько demo-поток]
+    Rules --> DB[(SQLite / PostgreSQL)]
+    DB --> DemoGraph[NetworkX demo graph]
+    DemoGraph --> UI[React Analyst Dashboard]
+    DB --> Cases[Investigation Workspace]
+    Analyst[Аналитик: точная схема признаков] --> MLAPI[Отдельные ML API]
+    MLAPI --> Specialists[PaySim / IEEE / BAF / IBM]
+    MLAPI --> Unified[Unified MTL experiment]
+    Specialists --> Assessment[ML assessment с provenance]
+    Unified --> Assessment
+    Assessment --> Cases
+    IBMReport[Офлайн IBM graph report\nагрегаты] --> UI
+    Registry[Model Registry\nметаданные + SHA-256] --> UI
 ```
 
-Открой `http://127.0.0.1:8000/demo/`. API-документация: `http://127.0.0.1:8000/docs`.
+Демо-перевод не направляется автоматически во все ML-модели: их схемы несовместимы. Аналитик явно выбирает модель и передаёт точный контракт признаков; сервер пересчитывает оценку и сохраняет provenance, но не входные значения.
 
-`/health` доступен без ключа, все маршруты с данными `/api/v1/*` требуют заголовок `X-API-Key`.
+Подробнее: [архитектура](docs/ARCHITECTURE.md) · [аудит данных и моделей](docs/MULTIDATA_AUDIT.md) · [следующие шаги](docs/NEXT_STEPS.md).
 
-## React + TypeScript (расширенный интерфейс)
+## Live Demonstration — How IZQAR Works
 
-Понадобится Node.js 22 и интернет для `npm install`. Backend должен работать.
+```mermaid
+sequenceDiagram
+    participant O as Синтетическая операция
+    participant R as Rule Engine
+    participant G as Graph analysis
+    participant A as Аналитик
+    participant I as Investigation
+    O->>R: demo-сценарий
+    R-->>A: риск и объяснимые правила
+    R->>G: сохранённая история demo-переводов
+    G-->>A: связи и структурные leads
+    A->>I: открыть дело, оставить решение/комментарий
+    A->>I: при необходимости добавить ML assessment
+    I-->>A: журнал действий и provenance модели
+```
 
-```bash
+1. Запустите сценарий: обычная операция, новый получатель, серия переводов, fan-in, цепочка или цикл.
+2. Откройте запись: Rule Engine объясняет именно demo-оценку.
+3. Перейдите к графу и изучите синтетические связи. Структурный сигнал не является доказательством мошенничества.
+4. Откройте расследование, задайте статус и комментарий — запись сохранится в журнале.
+5. В **ML Analytics** покажите реальные метрики и вызов каждой модели по её точной схеме.
+6. При необходимости прикрепите к делу пересчитанную ML assessment. Она не меняет Rule Engine и решение аналитика автоматически.
+
+Подробный пяти минутный сценарий: [docs/JURY_DEMO.md](docs/JURY_DEMO.md). Для каждого набора данных используйте отдельный запрос и не подставляйте фиктивный ответ модели.
+
+## Скриншоты интерфейса
+
+README намеренно не содержит декоративных или сгенерированных «скриншотов». Для жюри допустимы только снимки работающего приложения без API-ключей, приватных путей и выдуманных данных. Точные инструкции для Dashboard, мониторинга, ML Analytics, Registry, Graph, Investigation и Unified: [docs/screenshots/README.md](docs/screenshots/README.md).
+
+## Быстрый запуск
+
+> Текущая проверенная реализация находится в ветке `feat/ml-pipelines-and-startup`; `main` намеренно не изменялась. Для клона ветка должна быть опубликована в `origin` либо изменения должны быть приняты через PR.
+
+```powershell
+git clone https://github.com/Night011/izqar.git
+cd izqar
+git fetch origin
+git checkout feat/ml-pipelines-and-startup
+powershell -ExecutionPolicy Bypass -File .\scripts\start_local.ps1
+```
+
+Скрипт создаёт/проверяет локальную конфигурацию и ключ. Не вставляйте ключ в скриншоты, коммиты или чат. После готовности API:
+
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Открой `http://127.0.0.1:5173`. Веб-приложение использует Vite proxy для `/api` и не требует дополнительной настройки CORS в локальном режиме.
+- React Dashboard: `http://127.0.0.1:5173`
+- FastAPI health: `http://127.0.0.1:8000/health`
+- API docs: `http://127.0.0.1:8000/docs`
 
-## Обучение модели IEEE-CIS Fraud Detection
+Обучающие CSV и крупные артефакты не входят в Git. При отсутствии локального артефакта endpoint возвращает `503`, а не фиктивный прогноз. Инструкции по Kaggle, проверенному импорту артефактов и Unified final evaluation: [NEXT_STEPS](docs/NEXT_STEPS.md).
 
-1. Открой <https://www.kaggle.com/competitions/ieee-fraud-detection/data>, войди в аккаунт, прими правила конкурса и скачай оба файла: `train_transaction.csv` и `train_identity.csv`.
-2. Сохрани исходные CSV в `backend/data/ieee/` (директория игнорируется Git).
-3. Установи ML-зависимости и запусти обучение из `backend/`:
-
-```bash
-python -m pip install -r requirements-ml.txt
-python scripts/train_ieee.py --data-dir data/ieee --output models/ieee_final_v2.joblib --estimators 180 --mode final
-```
-
-Для экспериментов 100k/200k/300k сначала прочитай [протокол оценки](docs/IEEE_EVALUATION.md). `--max-train-rows` меняет только обучающий сегмент; validation и финальный test остаются фиксированными. Режим `experiment` не рассчитывает метрики финального test и сохраняет только validation-отчёт.
-
-Ограниченный эксперимент с дополнительными C/V-признаками, без доступа к финальному test:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\train_ieee.py --data-dir data\ieee --mode experiment --feature-set extended_cv --estimators 180 --output models\experiments\ieee_extended_cv_NEW.joblib
-```
-
-Режим `final` для `extended_cv` намеренно заблокирован: прежний финальный test уже просматривался. Протокол и результаты аудита: [docs/MULTIDATA_AUDIT.md](docs/MULTIDATA_AUDIT.md).
-
-Выход: `models/ieee_final_v2.joblib` и `models/ieee_final_v2.metrics.json` с настоящими метриками отложенной части **IEEE-CIS**. Отчёт включает baseline и XGBoost, Precision, Recall, F1, PR-AUC, ROC-AUC, матрицу ошибок, FPR/FNR и ложные тревоги на 10 000 операций. Артефакт модели содержит сериализованный объект Python (`joblib`); загружай только собственные/доверенные файлы. Для использования нового файла в API установи `IZQAR_MODEL_PATH` на его путь и перезапусти API. Скрипт не перезаписывает прежние результаты.
-
-## Обучение модели PaySim
-
-1. Скачай исходный CSV PaySim после принятия условий на [Kaggle](https://www.kaggle.com/datasets/ealaxi/paysim1) и помести его в `backend/data/paysim/`. Исходник не меняется и не коммитится.
-2. Запусти из `backend/`:
-
-```bash
-python -m pip install -r requirements-ml.txt
-python scripts/train_paysim.py --data data/paysim/PS_20174392719_1491204439457_log.csv --output models/paysim_model.joblib --estimators 180 --full-data
-```
-
-Для PaySim без `--full-data` действует ограничение 500 000 строк; IEEE-CIS теперь всегда читает весь размеченный CSV, чтобы закрепить финальный test, и ограничивает только train с `--max-train-rows`. Финальными считаются только метрики реального запуска с документированным размером данных. Модель PaySim использует исключительно доступные до операции `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; исключены `isFraud`, `isFlaggedFraud`, post-transaction balances, идентификаторы счетов и `step`. `oldbalance*` предполагаются остатками до операции; эту семантику необходимо проверять при переносе на иной источник данных.
-
-PaySim и IEEE-CIS не объединяются и не сравниваются как одна популяция. Их оценки доступны только через отдельные API: `/api/v1/paysim/predict` и `/api/v1/ieee/predict`.
-
-## BAF Base: отдельный детектор заявок
-
-[Feedzai BAF](https://github.com/feedzai/bank-account-fraud) моделирует заявки на открытие счетов, а не переводы. Пайплайн `backend/scripts/train_baf.py` использует только вариант `Base.csv`, явный список признаков заявки, `fraud_bool` как y и `month` только для разделения. Месяцы 0–5 образуют train, месяц 6 — validation, месяц 7 — закрытый test. Поле `device_fraud_count` и признаки с неясной доступностью на момент заявки исключены. Для воспроизведения используй [BAF Kaggle notebook](notebooks/baf_kaggle.ipynb) с **Add Input → `sgpjesus/bank-account-fraud-dataset-neurips-2022`**. Сначала изучи validation-отчёт; `RUN_FINAL` в исходном ноутбуке по умолчанию выключен. [Выполненный ноутбук v1](https://www.kaggle.com/code/hoogle57/izqar-baf-base-v1) содержит фиксированный запуск и результаты.
-
-BAF Base v1 обучена на 794 989 синтетических заявках; validation — 108 168, test — 96 843. Порог **0.914226** выбран на validation при лимите 100 ложных тревог на 10 000 заявок. На один раз оценённом test: Precision **0.288218**, Recall **0.207283**, F1 **0.241141**, PR-AUC **0.199692**, ROC-AUC **0.891305**, **731 FP**, **1132 FN**, FPR **0.007661**, FNR **0.792717**, **75.483** ложных тревог на 10 000 заявок. Это метрики синтетического набора; скор не калиброван для банка. Подробности и контрольная сумма ZIP — в [аудите](docs/MULTIDATA_AUDIT.md).
-
-При разрешённом доступе к собственному CSV можно выполнить локальный эксперимент из `backend/`, не затрагивая закрытый test:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\train_baf.py --data data\baf\Base.csv --mode experiment --output models\experiments\baf_base_trial_01.joblib --estimators 180 --max-false-alerts-per-10000 100
-```
-
-Архив `izqar_baf_base_v1_portable.zip` из выполненного запуска установлен локально в `backend/models/` через `scripts/install_model_bundle.py`; исходные CSV остаются в Kaggle. Путь по умолчанию — `backend/models/baf_base_v1_portable.metrics.json`; для другого артефакта установи `IZQAR_BAF_MODEL_PATH` в `.env` и перезапусти API. Отдельный `/api/v1/baf/predict` принимает `{"features": {...}}` строго по сохранённому списку признаков; при отсутствии модели возвращает 503. Страница ML Analytics показывает реальные метрики только при загрузке артефакта.
-
-### Обучение в Kaggle Notebooks без локальных CSV
-
-IBM AML — **четвёртая отдельная задача** по метке `Is Laundering`. [Исходный ноутбук HI-Small](notebooks/ibm_aml_kaggle.ipynb) требует **Add Input → `ealtman2019/ibm-transactions-for-anti-money-laundering-aml`**, но читает только `HI-Small_Trans.csv`; [выполненный ноутбук v1](https://www.kaggle.com/code/hoogle57/izqar-ibm-aml-hi-small-v1) сохранён отдельно. Скрипт `backend/scripts/train_ibm_aml.py` проверяет исходный заголовок с двумя одноимёнными столбцами `Account`, исключает оба счёта, банковские идентификаторы, целевую метку и сумму зачисления из ML-признаков. Разделение 70/15/15 определяется временными метками всего файла. Эксперимент на 500 000 ранних строк не рассчитывает test; полный финальный запуск использует все 3 554 649 ранних строк и выбирает порог по validation.
-
-На единожды оценённом IBM test (762 103 синтетические операции): Precision **0.063125**, Recall **0.667521**, F1 **0.115342**, PR-AUC **0.101293**, ROC-AUC **0.951370**, **15 465 FP**, **519 FN**, FPR **0.020334**, FNR **0.332479**, Precision@1000 **0.193**. Бюджет ложных тревог 100 на 10 000, выдержанный на validation (**99.161**), на test нарушен (**202.925**). Порог по test не перенастраивался. Переносимый ZIP проверен и установлен локально; `/api/v1/ibm-aml/predict` возвращает отдельный AML‑скор. При отсутствии артефакта маршрут возвращает 503. Это исследовательские метрики синтетического потока, не качество действующего банка. Контрольные суммы и ограничения — в [аудите](docs/MULTIDATA_AUDIT.md). [Источник и условия данных IBM](https://github.com/IBM/AML-Data).
-
-Загрузи [PaySim notebook](notebooks/paysim_kaggle.ipynb) и [IEEE-CIS notebook](notebooks/ieee_cis_kaggle.ipynb) как два отдельных Kaggle Notebooks. В первом используй **Add Input → ealaxi/paysim1**. Для второго сначала самостоятельно прими правила соревнования, затем **Add Input → ieee-fraud-detection**. Нужны только два размеченных train-файла; конкурсные test-файлы для оценки качества не используются. Включи Internet в настройках ноутбука для клонирования публичной feature-ветки и установки зависимостей. Если IEEE-файлы не появились в `/kaggle/input`, проверь принятие правил и повторно подключи Input.
-
-В PaySim используй обновлённый v2 notebook ниже и запусти все ячейки. В IEEE сначала запусти ячейки экспериментов и изучи validation-отчёты; финальная ячейка по умолчанию отключена (`RUN_FINAL = False`). После фиксации параметров и стратегии порога выставь `RUN_FINAL = True` и запусти её один раз. ZIP содержит метаданные, схему признаков, порог и реальные метрики; для PaySim v2 переносимый ZIP содержит preprocessing `joblib` и модель XGBoost JSON. Скачай ZIP из Output и установи только проверенные артефакты в `backend/models/`. `joblib` допускается только из доверенного собственного запуска. CSV остаются в Kaggle и не копируются в репозиторий. Для IEEE-CIS путь задаётся через `IZQAR_MODEL_PATH` или по умолчанию `backend/models/ieee_model.joblib`.
-
-**Совместимость существующих результатов.** Первоначальный полный PaySim-артефакт обучен с scikit-learn 1.6.1, локальное окружение API использует 1.9.1. Повторное обучение с 1.9.1 дало отдельный `paysim_model_v2.joblib`, но его сериализованный XGBoost также не загрузился из Kaggle Linux в Windows (`input stream corrupted`). Исходные v1/v2 файлы и отчёты сохранены. Последняя ячейка [PaySim v2 notebook](notebooks/paysim_compatible_kaggle.ipynb) экспортирует **ту же обученную v2 модель** в переносимом формате: XGBoost JSON, обученный preprocessing, метаданные, порог, исходные test-метрики и validation-аудит. Это отдельный ZIP `izqar_paysim_artifacts_v2_portable.zip`; повторного обучения и новой оценки test при экспорте нет. Устанавливай только архив из собственного доверенного запуска:
+### Проверки
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe scripts\install_model_bundle.py --bundle "C:\Users\a\Downloads\izqar_paysim_artifacts_v2_portable.zip" --destination models
+.\.venv\Scripts\python.exe -m pytest -q
+cd ..\frontend
+npm run build
 ```
 
-В корневом `.env` укажи `IZQAR_PAYSIM_MODEL_PATH=C:\...\IZQAR-MVP\backend\models\paysim_model_v2_portable.metrics.json` и перезапусти API. Для переносимого формата путь указывает **на `.metrics.json`**, рядом должны лежать `.preprocessor.joblib` и `.xgboost.json`. Обученный preprocessing остаётся Python `joblib`: загружай только доверенный файл при совпадающей версии scikit-learn. Повторная оценка на прежнем test в v2 — воспроизводимость, не независимая проверка улучшений; дальнейший подбор веди только на validation.
+Последняя локальная проверка: **51 backend tests passed**; React production build прошёл. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
 
-Для импорта PaySim ноутбука через веб-интерфейс Kaggle: **Code → New Notebook → Import Notebook → GitHub** и выбери `Night011/izqar`, ветку `feat/ml-pipelines-and-startup`, файл `notebooks/paysim_kaggle.ipynb`. Затем **Add Input → ealaxi/paysim1**. Если импорт локального файла через расширение Chrome заблокирован, включи доступ к file URLs в настройках расширения либо используй импорт из GitHub. Потребуется включить Internet в настройках Kaggle Notebook для `git clone` и установки пакетов. Не принимай правила конкурса IEEE-CIS от имени другого пользователя.
-
-API `/api/v1/ieee/predict` принимает JSON `{"features": {...}}` со всеми полями обученной схемы. Список `features` записан в `models/ieee_model.metrics.json`; для отсутствующих значений передай явный `null`. Неизвестные и пропущенные ключи возвращают 422.
-
-ML API **отдельный** от синтетического симулятора, потому что поля и целевые переменные четырёх наборов данных различаются. Если модель не обучена, соответствующий endpoint возвращает **503**.
-
-### Как оцениваем ML без самообмана
-
-- Сортировка `TransactionDT`: 70% **train**, 15% **validation**, 15% **test**.
-- Препроцессинг (импутация и OneHotEncoder) обучается **только** на train.
-- Порог по максимуму F1 выбирается **только** на validation.
-- PR-AUC, precision/recall/F1 и confusion matrix считаются на test **один раз**.
-- Разная доля мошеннических операций в разных источниках и временных периодах делает предсказанные скоры неоткалиброванными.
-- Не используем `isFraud` в признаках и не подменяем тестовые метрики примерными числами.
-
-Улучшения на будущее: калибровка на отдельном временном периоде, анализ data drift, устойчивость к новым устройствам и клиентам, групповые разбиения, оценка стоимости ложных блокировок и monitoring.
-
-## Docker Compose: PostgreSQL + API + React
-
-Создай `.env` и укажи **два разных случайных секрета** `IZQAR_API_KEY` и `POSTGRES_PASSWORD`. Далее:
-
-```bash
-mkdir -p backend/models
-docker compose up --build
-```
-
-Открой `http://127.0.0.1:5173`. Внешние порты Docker связаны только с `127.0.0.1`. Если хочешь использовать обученную модель в Docker, сначала создай `backend/models/ieee_model.joblib` локальным скриптом. После обучения перезапусти API.
-
-**Важно:** не публикуй текущую версию через Cloudflare Tunnel или на общедоступном сервере: для публичного банка нужны многоуровневая аутентификация, HTTPS, RBAC, аудит, rate limiting, полноценные миграции БД и верификация алгоритмов. Один demo API-key не заменяет банковскую безопасность.
-
-## API
+## API и данные
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| GET | `/health` | Healthcheck (без ключа) |
-| GET | `/demo/` | Автономная HTML/JS панель (без данных без ключа) |
-| POST | `/api/v1/transfers` | Оценить и сохранить синтетический перевод |
-| GET | `/api/v1/transactions` | Журнал переводов |
-| PATCH | `/api/v1/transactions/{id}/review` | Решение аналитика с необязательным комментарием; каждое изменение создаёт запись журнала |
-| GET | `/api/v1/investigations` | Серверная очередь среднего/высокого риска и уже рассматриваемых операций; фильтры `status`, `risk_level`, `search`, `sort`, `limit`, `offset` |
-| GET | `/api/v1/investigations/{id}` | Карточка операции, журнал действий и до 50 связанных переводов |
-| POST | `/api/v1/investigations/{id}/comments` | Добавить комментарий к расследованию |
-| GET | `/api/v1/metrics` | Статистика демонстрационной базы |
-| GET | `/api/v1/graph` | Граф счетов и индикаторы fan-in/out |
-| POST | `/api/v1/demo/simulate` | Запуск одного из пяти сценариев |
-| GET | `/api/v1/model/status` | Состояние отдельных ML-моделей, версии, схемы и реальные метрики установленных артефактов |
-| GET | `/api/v1/model/registry` | Активные модели и локальная история отчётов: схемы, происхождение, контрольные суммы и состояние файлов; требует API-ключ |
-| POST | `/api/v1/ieee/predict` | ML-скор записи IEEE-CIS (после обучения) |
-| POST | `/api/v1/paysim/predict` | ML-скор совместимой записи PaySim (после обучения) |
-| POST | `/api/v1/baf/predict` | ML-скор заявки BAF Base (после обучения) |
-| POST | `/api/v1/ibm-aml/predict` | Скор отмывания денег IBM AML HI-Small (после обучения) |
+| `GET` | `/health` | Healthcheck без ключа |
+| `POST` | `/api/v1/demo/simulate` | Синтетический сценарий Rule Engine |
+| `GET` | `/api/v1/transactions`, `/api/v1/graph` | Demo-журнал и ограниченный граф |
+| `GET` | `/api/v1/investigations` | Очередь и карточки расследований |
+| `POST` | `/api/v1/investigations/{id}/ml-assessments` | Server-side ML assessment без сохранения feature values |
+| `GET` | `/api/v1/model/status`, `/api/v1/model/registry` | Статус, реальные метрики, schema/provenance |
+| `POST` | `/api/v1/{paysim\|ieee\|baf\|ibm-aml}/predict` | Отдельные специализированные ML-запросы |
+| `POST` | `/api/v1/unified/{task}/predict` | Экспериментальная Unified head |
+| `GET` | `/api/v1/graph/ibm-aml-report` | Агрегаты IBM graph report без ID счетов |
 
-### Тестирование
+Все `/api/v1/*` вызовы требуют `X-API-Key`. Работайте только с доверенными локальными ML-артефактами: `joblib` исполняет Python-десериализацию, а JSON-манифест и SHA-256 не заменяют проверку происхождения.
 
-```bash
-cd backend
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-```
+## Данные, обучение и воспроизводимость
 
-## Структура репозитория
+- Исходные датасеты остаются у поставщиков и в Kaggle; CSV, токены и реальные персональные данные в репозиторий не добавляются.
+- PaySim: `isFraud` только y; исключены `isFlaggedFraud`, post-transaction balances, ID счетов и будущее. `step` — только время split.
+- IEEE-CIS: transaction/identity merge по `TransactionID` с one-to-one проверкой; `TransactionDT` — время split, не ML-признак.
+- BAF и IBM AML имеют собственные схемы и временные разбиения; их метки не считаются эквивалентными fraud-платежу.
+- Imputation и encoding fit только на train; thresholds фиксируются по validation. Test не выбирает параметры.
+- Ноутбуки: [PaySim](notebooks/paysim_kaggle.ipynb), [IEEE-CIS](notebooks/ieee_cis_kaggle.ipynb), [BAF](notebooks/baf_kaggle.ipynb), [IBM AML](notebooks/ibm_aml_kaggle.ipynb), [Unified](notebooks/unified_intelligence_kaggle.ipynb).
 
-```text
-backend/
-  app/                  FastAPI, риск-движок, граф, автономная панель
-  scripts/train_ieee.py Обучение XGBoost на IEEE-CIS
-  tests/                Pytest
-frontend/               React + TypeScript + Cytoscape
-scripts/start_local.ps1 Быстрый локальный запуск Windows
-docker-compose.yml      PostgreSQL + API + фронтенд
-docs/                   Архитектура, задачи для Codex
-.github/workflows/      CI для backend и frontend
-```
+## Технологии
 
-## Ограничения v0.1.0
+| Область | Используемый стек |
+|---|---|
+| Backend | Python, FastAPI, Pydantic, SQLAlchemy, SQLite / PostgreSQL |
+| ML | XGBoost, scikit-learn, pandas, NumPy; PyTorch для Unified MTL |
+| Frontend | React, TypeScript, Vite, Cytoscape.js |
+| Graph | NetworkX, временные и структурные алгоритмы |
+| Инфраструктура | Windows PowerShell startup, Docker Compose, GitHub Actions workflow |
 
-- Текущая модель правил использует фиксированные эвристики, а не обученные веса.
-- Graph Engine показывает fan-in и fan-out, но **не** объявляет найденные счета мошенническими.
-- IEEE-CIS используется как отдельный классификатор онлайн-платежей; на нём нельзя обучить граф реальных переводов между счетами.
-- Действия аналитика по синтетическим переводам сохраняются в локальном append-only журнале `investigation_events`; старые решения до появления этой таблицы не реконструируются. Общий API-ключ **не подтверждает личность** конкретного аналитика. Для банка нужны личные учётные записи, роли, защищённый неизменяемый аудит, миграции БД и защищённый деплой.
-- Экран расследования работает с локальными синтетическими переводами и их Rule Engine сигналами. Отдельные запросы ML-инференса пока не создают инцидент автоматически; это не следует выдавать за законченный сквозной банковский поток.
-- Исторические демонстрационные счета и сценарии не отражают реальную банковскую активность.
-- PaySim остаётся синтетическим набором данных; метрики на нём нельзя переносить на реальный банк. ML-скор не откалиброван как вероятность.
-- Разработка возможна без Kaggle CSV; исходные датасеты и большие модели **не включены** в Git. При отсутствии локального артефакта соответствующая карточка в ML Analytics показывает его отсутствие.
+## Ограничения и roadmap
 
-Порядок показа жюри и проверяемые сценарии: [docs/JURY_DEMO.md](docs/JURY_DEMO.md).
+### Ограничения
+
+- IZQAR — research MVP, не production-ready банковская система.
+- Большинство тренировочных источников синтетические; IEEE-CIS не доказывает качество на клиентах банка Казахстана.
+- Высокая метрика PaySim не переносится автоматически на реальные банковские операции.
+- IBM AML имеет высокий уровень ложных тревог на test; порог по test не перенастраивался.
+- Unified — validation-only эксперимент; его скоры не откалиброваны как вероятности и она не заменила специализированные модели.
+- Графовые сигналы — leads, а не доказательство мошенничества или отмывания.
+- Один локальный API-key не является корпоративной аутентификацией, RBAC или неизменяемым аудитом.
+
+### Roadmap
+
+1. Улучшать Precision/Recall и стоимость ложных тревог на новых validation-периодах, не переиспользуя просмотренные test.
+2. Добавить исторические поведенческие признаки, устойчивость к drift/неизвестным категориям и отдельную graph ML-модель.
+3. Калибровать риски только на корректно выделенных данных.
+4. Продолжить Unified MTL и выполнить одну sealed final evaluation зафиксированной конфигурации.
+5. Добавить корпоративные роли, защищённый аудит, мониторинг и интеграции с разрешёнными банковскими потоками.
 
 ## Лицензии и данные
 
-Исходники прототипа доступны под MIT (см. `LICENSE`). IEEE-CIS принадлежит владельцам датасета и подчиняется условиям Kaggle; **не загружай CSV в GitHub**. В приложении нет реальных банковских или персональных данных.
+Исходный код распространяется по [MIT License](LICENSE). У каждого датасета есть собственные условия: соблюдайте правила Kaggle для IEEE-CIS, лицензию PaySim, BAF и IBM AML. В репозитории не должно быть CSV датасетов, Kaggle API-токенов, `.env`, непроверенных обучающих ZIP или реальных пользовательских данных.

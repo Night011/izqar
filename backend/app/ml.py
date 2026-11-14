@@ -18,6 +18,39 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _local_xgboost_explanation(artifact: dict, frame) -> list[dict]:
+    """Return bounded, local TreeSHAP log-odds contributions for one record.
+
+    Feature values are never echoed back.  Contributions describe the fitted
+    model, not causal relationships or a calibrated fraud probability.  The
+    explanation is deliberately best-effort: an inference response remains
+    available if a legacy trusted artifact cannot expose feature names.
+    """
+    try:
+        import math
+        import numpy as np
+        from xgboost import DMatrix
+
+        pipeline = artifact['pipeline']
+        preprocessing = pipeline.named_steps['preprocessing']
+        model = pipeline.named_steps['model']
+        transformed = preprocessing.transform(frame)
+        names = list(preprocessing.get_feature_names_out())
+        contributions = model.get_booster().predict(DMatrix(transformed), pred_contribs=True)[0]
+        if len(names) != len(contributions) - 1:
+            return []
+        ranked = sorted(
+            ((str(name), float(value)) for name, value in zip(names, contributions[:-1])
+             if math.isfinite(float(value))),
+            key=lambda item: (-abs(item[1]), item[0]),
+        )[:5]
+        return [{'feature': name, 'log_odds_contribution': round(value, 6),
+                 'direction': 'increases_model_score' if value > 0 else 'decreases_model_score'}
+                for name, value in ranked]
+    except Exception:
+        return []
+
+
 def _prepare_legacy_unified_sklearn_types() -> bool:
     """Restore the harmless list subclass removed after scikit-learn 1.6.
 
@@ -232,6 +265,8 @@ def predict_ieee(features: dict):
             'flagged': score >= artifact['threshold'],
             'source': 'ieee_cis_ml', 'model_version': artifact.get('model_version', 'unknown'),
             'score_kind': 'uncalibrated_ml_score',
+            'explanation_method': 'local_tree_shap_log_odds',
+            'explanation': _local_xgboost_explanation(artifact, frame),
             'warning': 'Результат модели на исследовательских данных, не подтверждённая вероятность мошенничества в банке.'}
 
 
@@ -261,6 +296,8 @@ def predict_paysim(features: dict):
             'flagged': score >= artifact['threshold'], 'source': 'paysim_ml',
             'model_version': artifact.get('model_version', 'unknown'),
             'score_kind': 'uncalibrated_ml_score',
+            'explanation_method': 'local_tree_shap_log_odds',
+            'explanation': _local_xgboost_explanation(artifact, frame),
             'warning': 'PaySim is synthetic. This ML score is not a calibrated banking fraud probability.'}
 
 
@@ -291,6 +328,8 @@ def predict_baf(features: dict):
             'flagged': score >= artifact['threshold'], 'source': 'baf_base_ml',
             'model_version': artifact.get('model_version', 'unknown'),
             'score_kind': 'uncalibrated_ml_score',
+            'explanation_method': 'local_tree_shap_log_odds',
+            'explanation': _local_xgboost_explanation(artifact, frame),
             'warning': 'BAF Base is synthetic account-application data, not a calibrated fraud probability for a bank.'}
 
 
@@ -329,6 +368,8 @@ def predict_ibm_aml(features: dict):
             'flagged': score >= artifact['threshold'], 'source': 'ibm_aml_ml',
             'model_version': artifact.get('model_version', 'unknown'),
             'score_kind': 'uncalibrated_ml_score',
+            'explanation_method': 'local_tree_shap_log_odds',
+            'explanation': _local_xgboost_explanation(artifact, frame),
             'warning': 'IBM AML uses synthetic laundering labels; this is not a calibrated bank fraud probability.'}
 
 
@@ -358,4 +399,5 @@ def predict_unified(task: str, features: dict):
     return {'risk_score': round(score * 100, 2), 'threshold': threshold, 'flagged': score >= threshold,
             'source': 'izqar_unified_mtl_experimental', 'model_version': artifact['report']['model_version'],
             'score_kind': 'uncalibrated_ml_score',
+            'explanation_method': 'not_available_for_experimental_shared_backbone', 'explanation': [],
             'warning': 'Experimental joint model. This is not a calibrated probability and does not replace the specialised detector unless validation comparison supports it.'}
