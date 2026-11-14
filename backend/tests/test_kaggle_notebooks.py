@@ -21,3 +21,12 @@ def test_paysim_recall_candidate_notebook_is_report_only_and_revision_pinned():
     assert "metadata['test_metrics'] is None" in source
     assert "archive.write(report, report.name)" in source
     assert 'archive.write(output, output.name)' not in source
+
+
+def test_specialist_notebooks_pin_reviewed_code_and_default_to_no_final_test():
+    for name in ('ieee_cis_kaggle.ipynb', 'baf_kaggle.ipynb', 'ibm_aml_kaggle.ipynb'):
+        parsed = json.loads((ROOT / 'notebooks' / name).read_text(encoding='utf-8'))
+        source = '\n'.join(''.join(cell.get('source', [])) for cell in parsed['cells'])
+        assert "EXPECTED_REVISION = '" in source
+        assert "['git', 'checkout', '--detach', EXPECTED_REVISION]" in source
+        assert 'RUN_FINAL = False' in source

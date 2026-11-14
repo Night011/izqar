@@ -63,6 +63,8 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 Для первого controlled recall candidate подготовлен [ноутбук](../notebooks/paysim_recall_candidate_kaggle.ipynb). Он фиксирует `positive_weight_multiplier=1.25`, запускает только `--mode experiment` на полном PaySim и экспортирует **report-only** ZIP. Ноутбук проверяет точный SHA Git commit до обучения; перед запуском feature-ветка с этим commit должна быть явно опубликована или текущий код должен быть загружен в Kaggle эквивалентным проверяемым способом. Не обходите эту проверку и не устанавливайте report-only ZIP как модель API.
 
+Все specialist Kaggle notebooks теперь фиксируют проверенную ревизию до установки зависимостей. Перед запуском их также необходимо сделать доступными Kaggle через разрешённую публикацию feature-ветки или загрузку текущего кода; отказ checkout — корректный стоп, а не повод запускать другой commit.
+
 ## Локальные проверки и запуск
 
 ```powershell
