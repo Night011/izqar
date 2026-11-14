@@ -59,6 +59,8 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 Каждый отчёт из `models/experiments/` показывается в Model Registry как **кандидат** и не может заменить API-модель сам по себе. После независимой проверки и явного решения о promotion сохраните финальный артефакт вне `models/experiments/`, проверьте provenance/SHA-256 и только затем явно настройте путь активной модели. Не копируйте candidate-файлы поверх serving-артефактов вручную.
 
+Для PaySim candidate сравнивайте `validation_type_slices.TRANSFER/CASH_OUT` и `validation_robustness` вместе с общими F1/PR-AUC/FP. Нулевой или отрицательный эффект в одном synthetic stress scenario не объясняет будущий дрейф и не допускает настройки на старом test.
+
 ## Локальные проверки и запуск
 
 ```powershell

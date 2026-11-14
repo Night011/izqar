@@ -69,6 +69,63 @@ def choose_threshold(y_true, scores):
     return float(thresholds[int(np.argmax(f1))])
 
 
+def type_slice_metrics(rows: pd.DataFrame, scores: np.ndarray, threshold: float) -> dict:
+    """Validation-only quality slices for transfer types that can contain fraud.
+
+    ``type`` is known before the transaction and is already a serving feature.
+    This function never uses an account identifier or a post-transaction field;
+    the label is used solely to measure the saved validation prediction.
+    """
+    result = {}
+    for transaction_type in ('TRANSFER', 'CASH_OUT'):
+        mask = rows['type'].astype(str).eq(transaction_type).to_numpy()
+        y = rows.loc[mask, 'isFraud'].astype(int).to_numpy()
+        if len(y) == 0:
+            result[transaction_type] = {'available': False, 'reason': 'type absent from validation window'}
+        elif len(np.unique(y)) < 2:
+            result[transaction_type] = {
+                'available': False, 'reason': 'slice has only one label class; ranking metrics are undefined',
+                'cases': int(len(y)), 'fraud_cases': int(y.sum()),
+            }
+        else:
+            result[transaction_type] = {'available': True, **evaluate(y, scores[mask], threshold)}
+    return result
+
+
+def robustness_diagnostics(pipeline: Pipeline, rows: pd.DataFrame, scores: np.ndarray, threshold: float) -> dict:
+    """Exercise serving preprocessing under explicit, non-production perturbations.
+
+    These diagnostics are intentionally validation-only and are not a claim
+    about future bank traffic.  Missingness is deterministic so reports are
+    reproducible.  Unknown-category handling measures schema resilience, not
+    fraud quality, because the synthetic category has no truthful label.
+    """
+    features = rows[FEATURES].copy()
+    y = rows['isFraud'].astype(int).to_numpy()
+    missing = features.copy()
+    missing_positions = np.arange(len(missing)) % 10 == 0
+    missing.loc[missing.index[missing_positions], ['oldbalanceOrg', 'oldbalanceDest']] = np.nan
+    missing_scores = pipeline.predict_proba(missing)[:, 1]
+    unknown = features.copy()
+    unknown['type'] = '__unseen_transaction_type__'
+    unknown_scores = pipeline.predict_proba(unknown)[:, 1]
+    return {
+        'scope': 'validation_only_synthetic_preprocessing_stress',
+        'warning': 'Perturbations are diagnostic only; they do not model a future fraud distribution or authorize threshold changes.',
+        'missing_balances_every_tenth_row': {
+            'affected_rows': int(missing_positions.sum()), 'metrics': evaluate(y, missing_scores, threshold),
+            'recall_delta_vs_unmodified': round(float(recall_score(y, (missing_scores >= threshold).astype(int), zero_division=0)
+                                                    - recall_score(y, (scores >= threshold).astype(int), zero_division=0)), 6),
+        },
+        'unseen_type_encoding': {
+            'synthetic_category': '__unseen_transaction_type__', 'cases': int(len(unknown)),
+            'mean_score_delta_vs_unmodified': round(float(np.mean(unknown_scores) - np.mean(scores)), 6),
+            'flagged_rate_unmodified': round(float(np.mean(scores >= threshold)), 6),
+            'flagged_rate_with_unseen_type': round(float(np.mean(unknown_scores >= threshold)), 6),
+        },
+    }
+
+
 def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
     columns = set(pd.read_csv(path, nrows=0).columns)
     missing = REQUIRED - columns
@@ -149,6 +206,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         baseline_test_metrics = evaluate(test_rows['isFraud'].astype(int), baseline.predict_proba(test_rows[FEATURES])[:, 1], .5)
     artifact = {
         'format_version': 2, 'model_kind': 'paysim', 'model_version': model_version,
+        'run_mode': mode,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(), 'dataset': 'PaySim (synthetic Kaggle dataset)',
         'data_files': [file_provenance(data_path)],
         'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
@@ -156,6 +214,8 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'experiment': finish_experiment(experiment, started),
         'features': FEATURES, 'numerical_features': NUMERIC, 'categorical_features': CATEGORICAL, 'pipeline': pipeline,
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
+        'validation_type_slices': type_slice_metrics(valid_rows, valid_scores, threshold),
+        'validation_robustness': robustness_diagnostics(pipeline, valid_rows, valid_scores, threshold),
         'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), valid_scores, threshold),

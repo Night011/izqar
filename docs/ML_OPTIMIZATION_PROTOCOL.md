@@ -50,6 +50,8 @@ cd backend
 
 Не запускайте `--mode final` для настройки этих старых holdout. Для Unified остаётся отдельная sealed one-time final процедура из [NEXT_STEPS.md](NEXT_STEPS.md).
 
+PaySim-отчёт теперь содержит `validation_type_slices` для `TRANSFER` и `CASH_OUT`, а также `validation_robustness`. Последний выполняет детерминированную пропуск-стресс-проверку балансов и schema-проверку неизвестной категории `type` только на validation. Это диагностические результаты, а не реалистичный сценарий мошенничества и не причина менять threshold.
+
 Для Unified task-balancing experiment передайте все четыре веса явно, например:
 
 ```powershell

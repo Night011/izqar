@@ -20,7 +20,7 @@ from install_model_bundle import install as install_model_bundle  # noqa: E402
 def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeypatch):
     rows = 300
     paysim = pd.DataFrame({
-        'step': range(rows), 'type': ['TRANSFER' if i % 2 else 'PAYMENT' for i in range(rows)],
+        'step': range(rows), 'type': [['TRANSFER', 'CASH_OUT', 'PAYMENT'][i % 3] for i in range(rows)],
         'amount': [float(20 + i % 15) for i in range(rows)],
         'oldbalanceOrg': [float(100 + i % 20) for i in range(rows)],
         'oldbalanceDest': [float(i % 20) for i in range(rows)],
@@ -39,12 +39,18 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert pay_report['baseline_convergence']['converged'] is True
     assert set(pay_report['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     assert {'100', '500', '1000'} <= set(pay_report['validation_ranking_metrics'])
+    assert pay_report['run_mode'] == 'final'
+    assert pay_report['validation_type_slices']['TRANSFER']['available'] is True
+    assert pay_report['validation_type_slices']['CASH_OUT']['available'] is True
+    assert pay_report['validation_robustness']['missing_balances_every_tenth_row']['affected_rows'] > 0
+    assert pay_report['validation_robustness']['unseen_type_encoding']['cases'] == pay_report['split_counts']['validation']
     assert pay_report['feature_importance']['top_30']
     assert all('isFraud' not in row['feature'] and 'newbalance' not in row['feature'] for row in pay_report['feature_importance']['top_30'])
     pay_experiment = tmp_path / 'experiments' / 'paysim_candidate.joblib'
     train_paysim(paysim_path, pay_experiment, n_estimators=8, max_rows=None, mode='experiment')
     pay_experiment_report = json.loads(pay_experiment.with_suffix('.metrics.json').read_text(encoding='utf-8'))
     assert not pay_experiment.exists()
+    assert pay_experiment_report['run_mode'] == 'experiment'
     assert pay_experiment_report['test_metrics'] is None
     assert pay_experiment_report['baseline_test_metrics'] is None
     weighted_pay = tmp_path / 'experiments' / 'paysim_weighted.joblib'
