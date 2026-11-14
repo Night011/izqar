@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronRight, CircleHelp, Clock, Cpu, Fingerprint, GitBranch, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Search, Shield, ShieldAlert, ShieldCheck, Wallet, X } from 'lucide-react';
-import { Graph } from './Graph';
-import { MLAnalytics } from './MLAnalytics';
-import { InvestigationWorkspace } from './InvestigationWorkspace';
 import { money, request, shortDate } from './api';
 import type { GraphData, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
 import './styles.css';
 import './model-summary.css';
 import './investigations.css';
+
+// Cytoscape and the investigation/ML workspaces are useful only after an
+// analyst opens their respective tab. Keep the initial dashboard bundle small
+// for a local demo machine and load each workspace on demand.
+const Graph = lazy(() => import('./Graph').then(module => ({ default: module.Graph })));
+const MLAnalytics = lazy(() => import('./MLAnalytics').then(module => ({ default: module.MLAnalytics })));
+const InvestigationWorkspace = lazy(() => import('./InvestigationWorkspace').then(module => ({ default: module.InvestigationWorkspace })));
+const LoadingWorkspace = () => <div className="empty-state big"><Activity size={27}/><strong>Загружаем рабочее пространство…</strong></div>;
 
 const scenarios: { type: Scenario; label: string; description: string }[] = [
   { type: 'normal', label: 'Обычная оплата', description: 'Небольшая покупка' },
@@ -157,11 +162,11 @@ function App() {
             <div className="table-tools"><div className="search"><Search size={16} /><input aria-label="Поиск счёта" value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск счёта или сценария" /></div><div className="filter-row">{(['all','low','medium','high'] as const).map(f => <button className={'filter-btn '+(filter===f?'on':'')} key={f} onClick={() => setFilter(f)}>{f==='all'?'Все':riskLabels[f]}</button>)}</div></div>
             <div className="table-wrap"><table><thead><tr><th>ВРЕМЯ</th><th>ОТПРАВИТЕЛЬ / ПОЛУЧАТЕЛЬ</th><th>СУММА</th><th>РИСК</th><th>РЕШЕНИЕ</th><th /></tr></thead><tbody>{visibleRows.map(tx => <tr key={tx.id} onClick={() => setSelected(tx)} className="transaction-row"><td className="muted">{shortDate(tx.created_at)}</td><td><div className="account-flow">{tx.sender}<ArrowRight size={13}/>{tx.recipient}</div></td><td className="amount-cell">{money(tx.amount)}</td><td><span className={'risk-chip '+tx.risk_level}><i/>{riskLabels[tx.risk_level]} · {tx.risk_score}</span></td><td className="muted">{decisionLabels[tx.decision]}</td><td><ChevronRight size={16}/></td></tr>)}</tbody></table>{!visibleRows.length && <div className="empty-state"><Activity size={25}/><strong>Пока нет операций</strong><span>Запустите сценарий выше, чтобы начать демонстрацию.</span></div>}</div>
           </section>
-        </> : tab === 'investigations' ? <InvestigationWorkspace apiKey={key} initialId={investigationFocus} onChanged={() => refresh(key)} /> : tab === 'network' ? <>
+        </> : tab === 'investigations' ? <Suspense fallback={<LoadingWorkspace />}><InvestigationWorkspace apiKey={key} initialId={investigationFocus} onChanged={() => refresh(key)} /></Suspense> : tab === 'network' ? <>
           <div className="graph-summary"><Stat label="Счетов в выборке" value={String(graph.nodes.length)} info="Уникальные узлы" icon={<Fingerprint size={19}/>} /><Stat label="Направлений переводов" value={String(graph.edges.length)} info="Рёбра графа" icon={<GitBranch size={19}/>} /><Stat label="Высокий входящий поток" value={String(graph.indicators.high_fan_in_accounts.length)} info="3+ разных отправителя" icon={<ArrowDownLeft size={19}/>} /><Stat label="Высокий исходящий поток" value={String(graph.indicators.high_fan_out_accounts.length)} info="3+ разных получателя" icon={<ArrowUpRight size={19}/>} /></div>
-          <section className="panel graph-panel"><div className="panel-header"><div><h2>Финансовая сеть</h2><p>Оранжевым отмечены узлы с повышенной входящей или исходящей связностью</p></div><span className="count-tag">NetworkX + Cytoscape</span></div>{graph.nodes.length ? <Graph data={graph} /> : <div className="empty-state big"><GitBranch size={27}/><strong>Нет связей</strong><span>В разделе «Обзор системы» запустите сценарий «Сеть получателей».</span></div>}</section>
+          <section className="panel graph-panel"><div className="panel-header"><div><h2>Финансовая сеть</h2><p>Оранжевым отмечены узлы с повышенной входящей или исходящей связностью</p></div><span className="count-tag">NetworkX + Cytoscape</span></div>{graph.nodes.length ? <Suspense fallback={<LoadingWorkspace />}><Graph data={graph} /></Suspense> : <div className="empty-state big"><GitBranch size={27}/><strong>Нет связей</strong><span>В разделе «Обзор системы» запустите сценарий «Сеть получателей».</span></div>}</section>
           <div className="panel graph-note"><Shield size={20}/><p>{graph.indicators.note || 'Структурные сигналы графа не означают доказанное мошенничество.'}</p></div>
-        </> : <MLAnalytics status={model} apiKey={key} />}
+        </> : <Suspense fallback={<LoadingWorkspace />}><MLAnalytics status={model} apiKey={key} /></Suspense>}
         <footer>IZQAR · Intelligent Fraud Prevention Platform <span>Research prototype v0.1.0</span></footer>
       </main>
     </div>
