@@ -38,6 +38,12 @@ def make_ordered_csv(path: Path):
                              'USD', 'Wire' if i % 2 else 'ACH', int(i % 13 == 0)])
 
 
+def make_unordered_csv(path: Path):
+    make_ordered_csv(path)
+    lines = path.read_text(encoding='utf-8').splitlines()
+    path.write_text('\n'.join([lines[0], *reversed(lines[1:])]) + '\n', encoding='utf-8')
+
+
 def test_ibm_aml_temporal_train_export_and_schema(tmp_path, client, auth, monkeypatch):
     path = tmp_path / 'HI-Small_Trans.csv'
     make_csv(path)
@@ -105,3 +111,12 @@ def test_ibm_causal_history_candidate_is_experiment_only(tmp_path):
     with pytest.raises(ValueError, match='validation-only candidate'):
         train(path, tmp_path / 'history_final.joblib', mode='final', n_estimators=8, max_train_rows=100,
               max_false_alerts_per_10000=None, feature_set='causal_history_v1')
+
+
+def test_ibm_causal_history_externally_sorts_unordered_source(tmp_path):
+    path = tmp_path / 'HI-Small_Trans.csv'; make_unordered_csv(path)
+    train_cut, valid_cut, _, train_available = time_boundaries(path)
+    split, _ = load_splits(path, train_cut, valid_cut, train_available, 100, False,
+                           feature_set='causal_history_v1', history_max_accounts=100)
+    assert set(HISTORY_FEATURES) <= set(split['train'][0])
+    assert len(split['validation'][0]) > 0

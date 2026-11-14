@@ -9,7 +9,9 @@ import argparse
 import csv
 import json
 import os
+import sqlite3
 import sys
+import tempfile
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +64,33 @@ def iter_raw(path: Path, include_accounts: bool = False):
         dtypes.update({'Account': 'string', 'Account.1': 'string'})
     yield from pd.read_csv(path, usecols=HISTORY_READ_COLUMNS if include_accounts else READ_COLUMNS, dtype=dtypes,
                            chunksize=CHUNK_SIZE, low_memory=False)
+
+
+def iter_history_chronological(path: Path):
+    """External-sort history rows by parsed timestamp without loading HI-Small in RAM.
+
+    The source CSV is not modified.  SQLite is an ephemeral local work file;
+    it allows a 16 GiB developer machine to preserve causal ordering even when
+    the source's physical row order is not chronological.
+    """
+    with tempfile.TemporaryDirectory(prefix='izqar-ibm-history-') as temporary:
+        database = Path(temporary) / 'history-sort.sqlite3'
+        connection = sqlite3.connect(database)
+        try:
+            for chunk in iter_raw(path, include_accounts=True):
+                stored = chunk.copy()
+                stored['_timestamp_ns'] = parse_time(stored['Timestamp']).astype('int64')
+                stored.to_sql('transactions', connection, if_exists='append', index=False,
+                              chunksize=10_000, method='multi')
+            connection.execute('CREATE INDEX timestamp_order ON transactions (_timestamp_ns)')
+            query_columns = ', '.join(f'"{column}"' for column in HISTORY_READ_COLUMNS)
+            query = f'SELECT {query_columns} FROM transactions ORDER BY _timestamp_ns ASC, rowid ASC'
+            for chunk in pd.read_sql_query(query, connection, chunksize=CHUNK_SIZE):
+                chunk['Amount Paid'] = pd.to_numeric(chunk['Amount Paid'], errors='raise').astype('float32')
+                chunk['Is Laundering'] = pd.to_numeric(chunk['Is Laundering'], errors='raise').astype('int8')
+                yield chunk
+        finally:
+            connection.close()
 
 
 def parse_time(values: pd.Series) -> pd.Series:
@@ -154,7 +183,8 @@ def load_splits(path: Path, train_cut: pd.Timestamp, valid_cut: pd.Timestamp,
                 labels[name].append(rows['Is Laundering'].to_numpy(dtype='int8'))
             if name == 'train':
                 train_seen += count
-    for chunk in iter_raw(path, include_accounts=history_stream is not None):
+    chunks = iter_history_chronological(path) if history_stream is not None else iter_raw(path)
+    for chunk in chunks:
         if history_stream is None:
             consume(chunk)
         else:
