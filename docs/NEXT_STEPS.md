@@ -42,7 +42,7 @@ python backend/scripts/train_unified.py --paysim <PaySim.csv> --ieee-dir <ieee-d
 
 ## IBM AML graph-анализ на Kaggle
 
-Новый потоковый анализатор не читает `Is Laundering`, не передаёт весь граф браузеру и требует хронологически упорядоченный `HI-Small_Trans.csv`. Он строит только ограниченный отчёт fan-in/fan-out, быстрых цепочек и трёхузловых циклов; результаты являются leads для расследования, не доказательством отмывания:
+Новый потоковый анализатор не читает `Is Laundering`, не передаёт весь граф браузеру и внешне упорядочивает фактически неотсортированный `HI-Small_Trans.csv` по времени во временной SQLite БД. Он строит только ограниченный отчёт fan-in/fan-out, быстрых цепочек и трёхузловых циклов; результаты являются leads для расследования, не доказательством отмывания:
 
 ```powershell
 cd C:\Users\a\Documents\IZQAR-MVP\backend
@@ -52,6 +52,8 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 Не публикуйте отчёт с реальными идентификаторами счетов. При работе с Kaggle сохраняйте JSON в Output и переносите только проверенный агрегированный отчёт.
 
 После проверки перенесите JSON в `backend/models/experiments/ibm_graph_report.json` (этот каталог исключён из Git) либо задайте `IZQAR_IBM_AML_GRAPH_REPORT_PATH`. Перезапустите API: вкладка **Граф связей** получит только число строк, рёбер и структурных сигналов. Идентификаторы и сами цепочки API намеренно не возвращает.
+
+Первый проверенный Kaggle run уже импортирован штатным `scripts/import_ibm_graph_report.py`: 500 000 операций, 361 541 ребро, 50 fan-in, 50 fan-out, 50 rapid chains и 0 cycles. SHA-256 отчёта: `b710be76fbc87636ab469afcf217b308484471ced12e42e1564f05f2948bd65b`; pinned commit: `9e63654cb64c19174a5a863e82789b2ac60dcee6`; `label_used=false`. Не заменяйте его вручную: importer проверяет лимит размера, exact revision provenance, отсутствие target key и запрет перезаписи.
 
 ## Новые validation-only ML experiments
 

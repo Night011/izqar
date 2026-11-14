@@ -1,8 +1,8 @@
 """Stream a bounded, time-aware graph analysis of IBM AML HI-Small.
 
 This is an investigation aid for synthetic transfers, not a laundering label
-predictor.  It deliberately does not read ``Is Laundering``.  The source must
-be chronological so every rapid-chain signal is based only on prior rows.
+predictor.  It deliberately does not read ``Is Laundering``.  The source is
+ordered externally on disk so every rapid-chain signal sees only prior rows.
 """
 from __future__ import annotations
 
