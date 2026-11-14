@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from ibm_history_features import CausalAccountHistory, HISTORY_FEATURES, build_history_features  # noqa: E402
+from ibm_history_features import CausalAccountHistory, CausalHistoryStream, HISTORY_FEATURES, build_history_features  # noqa: E402
 
 
 def test_history_features_use_only_prior_timestamps_and_hide_accounts():
@@ -42,3 +42,21 @@ def test_history_rejects_nonchronological_and_has_bounded_cold_start():
                             'Account': ['A'], 'Account.1': ['B'], 'Amount Paid': [1]})
     _, state = build_history_features(current, history)
     assert state.tracked_accounts == 1
+
+
+def test_history_stream_holds_shared_timestamp_across_chunks():
+    stream = CausalHistoryStream()
+    first = pd.DataFrame({'Timestamp': ['2025-01-01 00:00:00', '2025-01-01 00:01:00'],
+                          'Account': ['A', 'C'], 'Account.1': ['B', 'B'], 'Amount Paid': [10, 20]})
+    second = pd.DataFrame({'Timestamp': ['2025-01-01 00:01:00', '2025-01-01 00:02:00'],
+                           'Account': ['D', 'A'], 'Account.1': ['B', 'E'], 'Amount Paid': [30, 5]})
+    ready_one, features_one = stream.feed(first)
+    ready_two, features_two = stream.feed(second)
+    ready_three, features_three = stream.finish()
+    assert ready_one.Timestamp.tolist() == ['2025-01-01 00:00:00']
+    # Both 00:01 rows are returned together and do not see one another.
+    assert ready_two.Timestamp.tolist() == ['2025-01-01 00:01:00', '2025-01-01 00:01:00']
+    assert features_two.iloc[0]['recipient_prior_incoming_count'] == 1.0
+    assert features_two.iloc[1]['recipient_prior_incoming_count'] == 1.0
+    assert ready_three.Timestamp.tolist() == ['2025-01-01 00:02:00']
+    assert features_three.iloc[0]['sender_prior_outgoing_count'] == 1.0

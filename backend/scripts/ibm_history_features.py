@@ -66,6 +66,40 @@ class CausalAccountHistory:
         return len(self._state)
 
 
+class CausalHistoryStream:
+    """Chunk adapter that never leaks a timestamp group across chunk boundaries."""
+
+    def __init__(self, history: CausalAccountHistory | None = None):
+        self.history = history or CausalAccountHistory()
+        self._carry: pd.DataFrame | None = None
+
+    def feed(self, chunk: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+        if chunk.empty:
+            return chunk.copy(), pd.DataFrame(columns=HISTORY_FEATURES, dtype='float32')
+        required = {'Timestamp', 'Account', 'Account.1', 'Amount Paid'}
+        if missing := required - set(chunk.columns):
+            raise ValueError(f'missing historical feature columns: {sorted(missing)}')
+        times = pd.to_datetime(chunk['Timestamp'], errors='raise')
+        if times.isna().any() or not times.is_monotonic_increasing:
+            raise ValueError('history stream requires chronological, complete timestamps')
+        combined = pd.concat([self._carry, chunk], ignore_index=True) if self._carry is not None else chunk.copy()
+        all_times = pd.to_datetime(combined['Timestamp'], errors='raise')
+        last_time = all_times.iloc[-1]
+        ready = combined.loc[all_times < last_time].copy()
+        self._carry = combined.loc[all_times == last_time].copy()
+        if ready.empty:
+            return ready, pd.DataFrame(columns=HISTORY_FEATURES, index=ready.index, dtype='float32')
+        features, self.history = build_history_features(ready, self.history)
+        return ready, features
+
+    def finish(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        if self._carry is None or self._carry.empty:
+            return pd.DataFrame(), pd.DataFrame(columns=HISTORY_FEATURES, dtype='float32')
+        ready, self._carry = self._carry, None
+        features, self.history = build_history_features(ready, self.history)
+        return ready, features
+
+
 def build_history_features(rows: pd.DataFrame, history: CausalAccountHistory | None = None) -> tuple[pd.DataFrame, CausalAccountHistory]:
     """Produce features for a chronologically sorted frame without labels.
 
