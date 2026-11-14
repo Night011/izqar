@@ -12,6 +12,20 @@ from .unified_network import TASKS as UNIFIED_TASKS, UnifiedNetwork
 PAYSIM_RAW_FEATURES = ('type', 'amount', 'oldbalanceOrg', 'oldbalanceDest')
 PAYSIM_V2_FEATURES = PAYSIM_RAW_FEATURES + ('amount_to_origin_balance', 'amount_to_destination_balance',
                                             'destination_balance_is_zero')
+REVIEWED_PAYSIM_V5_LEGACY_SKLEARN = '1.6.1'
+
+
+def _is_reviewed_paysim_v5_legacy(report: dict, expected_kind: str, portable: bool) -> bool:
+    """Allow only the reviewed portable v5 preprocessing migration.
+
+    This is not a general sklearn pickle compatibility promise.  The source
+    artifact is a sealed PaySim v5 export, and its direct transform has been
+    verified locally after restoring the derived imputer cache.
+    """
+    return (portable and expected_kind == 'paysim' and report.get('model_version') == 'paysim-xgboost-v5'
+            and tuple(report.get('features', ())) == PAYSIM_V2_FEATURES
+            and report.get('library_versions', {}).get('scikit_learn') == REVIEWED_PAYSIM_V5_LEGACY_SKLEARN
+            and sklearn.__version__ == '1.9.1')
 
 
 def _sha256_file(path: Path) -> str:
@@ -168,7 +182,8 @@ def _load_artifact(path: Path, expected_kind: str):
         if report.get('model_kind') != expected_kind:
             raise RuntimeError(f'Incorrect {expected_kind} model kind in metadata')
         trained_version = report.get('library_versions', {}).get('scikit_learn')
-        if trained_version and trained_version != sklearn.__version__:
+        legacy_paysim_v5 = _is_reviewed_paysim_v5_legacy(report, expected_kind, portable)
+        if trained_version and trained_version != sklearn.__version__ and not legacy_paysim_v5:
             raise RuntimeError(
                 f'{expected_kind} requires scikit-learn {trained_version}; runtime has {sklearn.__version__}. '
                 'Use a compatible artifact or retrain with matching versions.'
@@ -180,11 +195,22 @@ def _load_artifact(path: Path, expected_kind: str):
             from sklearn.pipeline import Pipeline
             from xgboost import XGBClassifier
             stem = path.name.removesuffix('.metrics.json')
-            preprocessing = joblib.load(path.with_name(stem + '.preprocessor.joblib'))
+            if legacy_paysim_v5:
+                import warnings
+                from sklearn.exceptions import InconsistentVersionWarning
+                _prepare_legacy_unified_sklearn_types()
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', InconsistentVersionWarning)
+                    preprocessing = joblib.load(path.with_name(stem + '.preprocessor.joblib'))
+                _repair_legacy_unified_preprocessors({'paysim': preprocessing})
+            else:
+                preprocessing = joblib.load(path.with_name(stem + '.preprocessor.joblib'))
             model = XGBClassifier()
             model.load_model(path.with_name(stem + '.xgboost.json'))
             artifact = dict(report)
             artifact['pipeline'] = Pipeline([('preprocessing', preprocessing), ('model', model)])
+            artifact['preprocessing_compatibility'] = ('reviewed_sklearn_1_6_to_1_9_adapter'
+                                                        if legacy_paysim_v5 else None)
         else:
             artifact = joblib.load(path)
     except Exception as exc:
@@ -194,7 +220,8 @@ def _load_artifact(path: Path, expected_kind: str):
             or 'pipeline' not in artifact or 'threshold' not in artifact):
         raise RuntimeError(f'Unsupported {expected_kind} model artifact format')
     trained_version = artifact.get('library_versions', {}).get('scikit_learn')
-    if trained_version and trained_version != sklearn.__version__:
+    if trained_version and trained_version != sklearn.__version__ and not _is_reviewed_paysim_v5_legacy(
+            artifact, expected_kind, portable):
         raise RuntimeError(f'{expected_kind} artifact requires scikit-learn {trained_version}; runtime has {sklearn.__version__}')
     return artifact
 

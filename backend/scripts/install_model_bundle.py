@@ -21,9 +21,21 @@ FORBIDDEN_FEATURES = {
     'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest',
     'TransactionID', 'TransactionDT',
 }
+REVIEWED_PAYSIM_V5_FEATURES = [
+    'type', 'amount', 'oldbalanceOrg', 'oldbalanceDest',
+    'amount_to_origin_balance', 'amount_to_destination_balance', 'destination_balance_is_zero',
+]
 
 
-def install(bundle: Path, destination: Path, expected_sha256: str | None = None) -> list[Path]:
+def reviewed_paysim_v5_legacy(report: dict, portable: bool) -> bool:
+    return (portable and report.get('model_kind') == 'paysim' and report.get('model_version') == 'paysim-xgboost-v5'
+            and report.get('features') == REVIEWED_PAYSIM_V5_FEATURES
+            and report.get('library_versions', {}).get('scikit_learn') == '1.6.1'
+            and sklearn.__version__ == '1.9.1')
+
+
+def install(bundle: Path, destination: Path, expected_sha256: str | None = None,
+            allow_reviewed_paysim_v5_legacy: bool = False) -> list[Path]:
     if expected_sha256 is not None:
         actual = hashlib.sha256(bundle.read_bytes()).hexdigest()
         if actual.lower() != expected_sha256.lower():
@@ -53,7 +65,9 @@ def install(bundle: Path, destination: Path, expected_sha256: str | None = None)
             raise ValueError('Bundle CRC check failed')
         if report.get('model_kind') not in {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml'} or report.get('model_version') is None:
             raise ValueError('Missing or unsupported model metadata')
-        if report.get('library_versions', {}).get('scikit_learn') != sklearn.__version__:
+        legacy_paysim_v5 = reviewed_paysim_v5_legacy(report, portable)
+        if report.get('library_versions', {}).get('scikit_learn') != sklearn.__version__ and not (
+                allow_reviewed_paysim_v5_legacy and legacy_paysim_v5):
             raise ValueError(f"Model requires scikit-learn {report.get('library_versions', {}).get('scikit_learn')}; runtime has {sklearn.__version__}")
         features = report.get('features')
         if not isinstance(features, list) or not features or any(not isinstance(feature, str) for feature in features):
@@ -91,8 +105,10 @@ def main() -> None:
     parser.add_argument('--bundle', type=Path, required=True)
     parser.add_argument('--destination', type=Path, required=True)
     parser.add_argument('--expected-sha256')
+    parser.add_argument('--allow-reviewed-paysim-v5-legacy', action='store_true',
+                        help='Allow only the reviewed portable PaySim v5 sklearn 1.6.1 to 1.9.1 adapter')
     args = parser.parse_args()
-    for path in install(args.bundle, args.destination, args.expected_sha256):
+    for path in install(args.bundle, args.destination, args.expected_sha256, args.allow_reviewed_paysim_v5_legacy):
         print(f'Installed: {path}')
 
 

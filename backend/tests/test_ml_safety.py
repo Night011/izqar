@@ -85,6 +85,17 @@ def test_paysim_v2_inference_derives_only_allowlisted_features(monkeypatch):
                            'origin_balance_after_requested_amount': 50.})
 
 
+def test_only_reviewed_paysim_v5_portable_report_can_use_legacy_adapter():
+    import app.ml as ml
+    report = {
+        'model_version': 'paysim-xgboost-v5', 'features': list(ml.PAYSIM_V2_FEATURES),
+        'library_versions': {'scikit_learn': '1.6.1'},
+    }
+    assert ml._is_reviewed_paysim_v5_legacy(report, 'paysim', portable=True) is True
+    report['features'] = list(ml.PAYSIM_RAW_FEATURES)
+    assert ml._is_reviewed_paysim_v5_legacy(report, 'paysim', portable=True) is False
+
+
 def test_paysim_loader_retains_original_label_only_for_training(tmp_path):
     source = tmp_path / 'paysim.csv'
     pd.DataFrame([{
