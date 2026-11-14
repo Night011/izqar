@@ -13,7 +13,8 @@ from sklearn.preprocessing import FunctionTransformer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from app.unified_network import TASKS, required_shapes
-from train_unified import baf, balanced_cap, choose_threshold, final_evaluation, ieee, metrics, parse_task_weights, resolve_device, transformer  # noqa: E402
+from train_unified import (baf, balanced_cap, choose_threshold, experiment_provenance, final_evaluation,
+                           ieee, metrics, parse_task_weights, resolve_device, transformer)  # noqa: E402
 
 
 def test_unified_trainer_cli_imports_app_when_run_directly():
@@ -41,6 +42,14 @@ def test_task_weights_are_complete_positive_and_explicit():
         parse_task_weights('{"paysim": 1}')
     with pytest.raises(ValueError, match='positive'):
         parse_task_weights('{"paysim": 1, "ieee_cis": 1, "baf_base": 0, "ibm_aml": 1}')
+
+
+def test_unified_experiment_provenance_is_explicit_and_copies_weights():
+    weights = {'paysim': 1.0, 'ieee_cis': 1.25, 'baf_base': 1.0, 'ibm_aml': 1.0}
+    report = experiment_provenance(weights)
+    weights['ieee_cis'] = 99.0
+    assert report == {'mode': 'experiment', 'task_weights': {'paysim': 1.0, 'ieee_cis': 1.25,
+                                                              'baf_base': 1.0, 'ibm_aml': 1.0}}
 
 
 def test_capping_preserves_temporal_order_and_validation_metrics_are_complete():

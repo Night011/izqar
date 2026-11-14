@@ -92,6 +92,12 @@ Kaggle kernel `hoogle57/izqar-ieee-extended-cv-weight-1-25-candidate-v1` зав�
 
 На fixed validation window (88 581 операций, budget 100 FP/10k): PR-AUC `0.464304`, Precision `0.577458`, Recall `0.395792`, F1 `0.469670`, FP `881`, FN `1 838`, 99.457 FP/10k. Это немного улучшает предыдущий verified candidate, но не является basis для auto-promotion. Следующая final evaluation допустима только один раз после явного freeze выбранной configuration; повторно использовать старый final test для подбора нельзя.
 
+### BAF и PaySim weight 0.75 candidates
+
+Оба Kaggle run привязаны к commit `32f288ba3d0756277e33971fc05f461745cfa606`, используют прежние temporal splits и не считают final test. BAF `positive_weight_multiplier=0.75` улучшил validation PR-AUC/Recall/F1 относительно baseline без роста FP budget: `0.164185` / `0.229655` / `0.232542` при 99.937 FP/10k. Он остаётся candidate до явного freeze и одной final evaluation. PaySim `positive_weight_multiplier=0.75` улучшил PR-AUC/F1 и сократил FP, но снизил общую и CASH_OUT Recall; он записан только как trade-off candidate, а baseline сохраняется для recall-приоритета.
+
+ZIP SHA-256: BAF `c8b4384a671517a1e94889e173907f3f586eadd4156e09b1158de8f0b664b4d3`; PaySim `aa3ed5e80912805f851ebfac83ca60b80088a5f104109c925b376407b0b454d3`. Оба прошли ZIP CRC и импортированы `scripts/import_experiment_report.py` без model payload.
+
 ## Локальные проверки и запуск
 
 ```powershell

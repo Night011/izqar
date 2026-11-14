@@ -60,6 +60,15 @@ def parse_task_weights(raw: str | None) -> dict[str, float]:
     return parsed
 
 
+def experiment_provenance(task_weights: dict[str, float]) -> dict:
+    """Metadata understood by the report-only experiment importer.
+
+    The sealed final evaluation is a separate command and must never be
+    implied by a training report.
+    """
+    return {'mode': 'experiment', 'task_weights': task_weights.copy()}
+
+
 def metrics(y, scores, threshold):
     predicted = (scores >= threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(y, predicted, labels=[0, 1]).ravel()
@@ -324,7 +333,16 @@ def main():
     with torch.no_grad():
         for name in TASKS:
             _,_,x,y=prepared[name]; scores=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); threshold=choose_threshold(y,scores); outputs[name]={'threshold':threshold,'validation_metrics':metrics(y,scores,threshold)}
-    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1','trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1','tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,'loss':'per-task positive-weighted BCE with explicit task weights and equal task update rounds','task_weights':task_weights,'seed':RNG,'best_validation_pr_auc_sum':best,'seconds':round(time.monotonic()-started,3),'history':history},'task_metadata':metadata,'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
+    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1',
+            'run_mode':'experiment','experiment':experiment_provenance(task_weights),
+            'trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1',
+            'tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,
+            'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,
+                        'loss':'per-task positive-weighted BCE with explicit task weights and equal task update rounds',
+                        'task_weights':task_weights,'seed':RNG,'best_validation_pr_auc_sum':best,
+                        'seconds':round(time.monotonic()-started,3),'history':history},
+            'task_metadata':metadata,
+            'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
     (args.output_dir/'unified.metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps({'output':str(args.output_dir),'tasks':outputs,'gradient_audit':gradient_audit},ensure_ascii=False,indent=2))
 
