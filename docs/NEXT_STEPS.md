@@ -65,6 +65,19 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 Все specialist Kaggle notebooks теперь фиксируют проверенную ревизию до установки зависимостей. Перед запуском их также необходимо сделать доступными Kaggle через разрешённую публикацию feature-ветки или загрузку текущего кода; отказ checkout — корректный стоп, а не повод запускать другой commit.
 
+### IBM AML causal-history candidate
+
+Повторный validation-only запуск уже создан как Kaggle kernel `hoogle57/izqar-ibm-aml-causal-history-candidate-v1` на commit `34656c00d64b2b3a0e997cd6f817fbba9fed933b`. Он выполняет `causal_history_v1` с disk-backed SQLite сортировкой истории по parsed timestamp и не экспортирует `joblib` либо final test. После завершения скачивайте только `izqar_ibm_causal_history_candidate_report.zip`, затем импортируйте его штатно:
+
+```powershell
+cd C:\Users\a\Documents\IZQAR-MVP\backend
+.\.venv\Scripts\python.exe scripts\import_experiment_report.py `
+  --archive <путь-к-izqar_ibm_causal_history_candidate_report.zip> `
+  --output-dir models\experiments
+```
+
+Импортёр проверяет лимит размера, плоскую структуру ZIP, pinned SHA ревизии и отсутствие final test; он не десериализует модели. Сравнивайте только validation с текущим IBM baseline и не меняйте active-артефакт без отдельного решения.
+
 ## Локальные проверки и запуск
 
 ```powershell
