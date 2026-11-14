@@ -51,12 +51,12 @@ Rule Engine, ML-скор и графовый индикатор **не объе�
 
 | Модель | Назначение и источник | Отложенный test | Precision | Recall | F1 | PR-AUC | ROC-AUC | FP / FN | Ложн. тревог / 10k |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| PaySim v2 | [синтетические переводы](https://www.kaggle.com/datasets/ealaxi/paysim1) | 955 744 | 0.898085 | 0.690025 | 0.780426 | 0.833058 | 0.998380 | 314 / 1 243 | 3.285 |
+| PaySim v5 | [синтетические переводы](https://www.kaggle.com/datasets/ealaxi/paysim1) | 955 744 | 0.983062 | 0.752618 | 0.852542 | 0.967377 | 0.999850 | 52 / 992 | 0.544 |
 | IEEE-CIS v2 | [онлайн-платежи](https://www.kaggle.com/competitions/ieee-fraud-detection) | 88 581 | 0.526988 | 0.414856 | 0.464247 | 0.444182 | 0.875369 | 1 148 / 1 804 | 129.599 |
 | BAF Base v1 | [синтетические заявки](https://github.com/feedzai/bank-account-fraud) | 96 843 | 0.288218 | 0.207283 | 0.241141 | 0.199692 | 0.891305 | 731 / 1 132 | 75.483 |
 | IBM AML HI-Small v1 | [синтетические AML-операции](https://github.com/IBM/AML-Data) | 762 103 | 0.063125 | 0.667521 | 0.115342 | 0.101293 | 0.951370 | 15 465 / 519 | 202.925 |
 
-Метрики взяты из установленных манифестов `backend/models/*.metrics.json`. Порог выбирался на validation, а не по итоговому test. Уже просмотренные test-наборы нельзя повторно использовать для подбора новой конфигурации.
+Метрики взяты из установленных манифестов `backend/models/*.metrics.json`. PaySim v5 — один sealed run после выбора clean pre-transaction v2 configuration на validation; portable export не переобучал модель. Порог выбирался на validation, а не по итоговому test. Уже просмотренные test-наборы нельзя повторно использовать для подбора новой конфигурации.
 
 ### IZQAR Unified Intelligence — эксперимент, validation-only
 
@@ -161,7 +161,7 @@ cd ..\frontend
 npm run build
 ```
 
-Последняя локальная проверка: **66 backend tests passed**; React production build прошёл. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
+Последняя локальная проверка: **80 backend tests passed**; React production build и живой Uvicorn smoke PaySim v5 прошли. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
 
 ## API и данные
 
