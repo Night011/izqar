@@ -40,6 +40,17 @@ python backend/scripts/train_unified.py --paysim <PaySim.csv> --ieee-dir <ieee-d
 
 После установки артефактов `GET /api/v1/model/status` показывает `unified_mtl.final_evaluation_available: true` только если SHA-256 отчёта совпадают с установленными компонентами. В противном случае final-метрики не отображаются, а Unified-инференс остаётся доступен по проверенным весам.
 
+## IBM AML graph-анализ на Kaggle
+
+Новый потоковый анализатор не читает `Is Laundering`, не передаёт весь граф браузеру и требует хронологически упорядоченный `HI-Small_Trans.csv`. Он строит только ограниченный отчёт fan-in/fan-out, быстрых цепочек и трёхузловых циклов; результаты являются leads для расследования, не доказательством отмывания:
+
+```powershell
+cd C:\Users\a\Documents\IZQAR-MVP\backend
+.\.venv\Scripts\python.exe scripts\analyze_ibm_graph.py --data <путь-к-HI-Small_Trans.csv> --output models\experiments\ibm_graph_report.json --max-rows 500000
+```
+
+Не публикуйте отчёт с реальными идентификаторами счетов. При работе с Kaggle сохраняйте JSON в Output и переносите только проверенный агрегированный отчёт.
+
 ## Локальные проверки и запуск
 
 ```powershell
