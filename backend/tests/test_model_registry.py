@@ -81,6 +81,21 @@ def test_registry_marks_nonactive_final_reports_as_archived(tmp_path):
     assert entry['state'] == 'report_only' and entry['lifecycle'] == 'archived'
 
 
+def test_registry_distinguishes_same_manifest_name_in_separate_experiments(tmp_path):
+    root = tmp_path / 'models'; root.mkdir()
+    report = {'format_version': 1, 'serialization': 'numpy_shared_backbone_v1',
+              'model_kind': 'izqar_unified_mtl', 'model_version': 'candidate',
+              'task_metadata': {task: {'feature_schema': {'all': ['amount']}}
+                                for task in ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')},
+              'tasks': {}}
+    for name in ('one', 'two'):
+        folder = root / 'experiments' / name; folder.mkdir(parents=True)
+        (folder / 'unified.metrics.json').write_text(json.dumps(report), encoding='utf-8')
+    entries = list_registry({}, root)['entries']
+    assert {entry['report_path'] for entry in entries} == {
+        'experiments/one/unified.metrics.json', 'experiments/two/unified.metrics.json'}
+
+
 def test_imported_validation_report_is_candidate_without_model_payload(tmp_path):
     report = {'format_version': 2, 'model_kind': 'paysim', 'model_version': 'candidate',
               'features': ['amount'], 'threshold': .5, 'run_mode': 'experiment',

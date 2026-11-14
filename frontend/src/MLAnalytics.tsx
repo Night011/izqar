@@ -24,7 +24,7 @@ function RegistryRow({ entry }: { entry: RegistryEntry }) {
   return <tr><td><strong>{names[entry.model_kind ?? entry.active_for ?? ''] ?? entry.model_kind ?? 'Неизвестная модель'}</strong><small>{lifecycle}</small></td>
     <td>{entry.model_version ?? '—'}</td><td>{label}{entry.error && <small>{entry.error}</small>}</td>
     <td>{quality}</td>
-    <td><details><summary>Происхождение</summary><p>{entry.dataset ?? 'Источник не указан'}</p><p>Манифест: {entry.manifest}</p><p>SHA-256: {entry.manifest_sha256 ?? '—'}</p>
+    <td><details><summary>Происхождение</summary><p>{entry.dataset ?? 'Источник не указан'}</p><p>Манифест: {entry.report_path ?? entry.manifest}</p><p>SHA-256: {entry.manifest_sha256 ?? '—'}</p>
       {entry.data_files?.map(file => <p key={file.filename}>Данные: {file.filename} · SHA-256 {file.sha256 ?? 'не указан'}</p>)}
       {entry.components?.map(file => <p key={file.filename}>Компонент: {file.filename} · SHA-256 {file.sha256}</p>)}</details></td></tr>;
 }
@@ -108,9 +108,9 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
     <section className="panel ml-card"><h2>Model Registry</h2><p>Активные артефакты, кандидаты и архивные отчёты. Контрольные суммы подтверждают идентичность файлов, а метрики взяты из сохранённых отчётов. Кандидат не становится рабочей моделью автоматически.</p>
       {registryError && <p className="ml-error">Ошибка реестра: {registryError}</p>}
       {registry && <><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Проверенные метрики</th><th>Аудит</th></tr></thead><tbody>
-        {registry.entries.filter(entry => entry.active_for).map(entry => <RegistryRow key={`${entry.active_for}-${entry.manifest}`} entry={entry} />)}
+        {registry.entries.filter(entry => entry.active_for).map(entry => <RegistryRow key={`${entry.active_for}-${entry.report_path ?? entry.manifest}`} entry={entry} />)}
       </tbody></table></div><details className="registry-history"><summary>История отчётов ({registry.entries.filter(entry => !entry.active_for).length})</summary><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Проверенные метрики</th><th>Аудит</th></tr></thead><tbody>
-        {registry.entries.filter(entry => !entry.active_for).map(entry => <RegistryRow key={entry.manifest} entry={entry} />)}
+        {registry.entries.filter(entry => !entry.active_for).map(entry => <RegistryRow key={entry.report_path ?? entry.manifest} entry={entry} />)}
       </tbody></table></div></details></>}
     </section>
     <section className="panel ml-card"><h2>Проверка ML-инференса</h2><p>Введите поля именно выбранной модели. Шаблон заполнен значениями для проверки схемы, а не реалистичной банковской операцией.</p>

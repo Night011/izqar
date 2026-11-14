@@ -40,9 +40,14 @@ def _components(report_path: Path, report: dict) -> list[Path]:
     return []
 
 
-def _entry(report_path: Path, active_kind: str | None, lifecycle: str) -> dict:
+def _entry(report_path: Path, active_kind: str | None, lifecycle: str, report_root: Path) -> dict:
+    """Expose a stable relative identifier even when report filenames collide."""
+    try:
+        relative_path = report_path.resolve().relative_to(report_root.resolve()).as_posix()
+    except ValueError:
+        relative_path = report_path.name
     result = {'manifest': report_path.name, 'active_for': active_kind,
-              'state': 'invalid', 'lifecycle': lifecycle, 'error': None}
+              'report_path': relative_path, 'state': 'invalid', 'lifecycle': lifecycle, 'error': None}
     try:
         if not report_path.is_file():
             raise ValueError('metadata missing')
@@ -136,7 +141,7 @@ def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
     for kind, path in active_paths.items():
         report_path = _report_path(path)
         seen.add(report_path.resolve())
-        entries.append(_entry(report_path, kind, _lifecycle(report_path, model_root, kind)))
+        entries.append(_entry(report_path, kind, _lifecycle(report_path, model_root, kind), model_root))
     if model_root.is_dir():
         root = model_root.resolve()
         for report_path in sorted(model_root.rglob('*.metrics.json')):
@@ -144,7 +149,7 @@ def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
             if resolved in seen or not resolved.is_relative_to(root) or len(entries) >= MAX_ENTRIES:
                 continue
             seen.add(resolved)
-            entries.append(_entry(report_path, None, _lifecycle(report_path, root, None)))
+            entries.append(_entry(report_path, None, _lifecycle(report_path, root, None), root))
     active = [item for item in entries if item['active_for'] is not None]
     history = [item for item in entries if item['active_for'] is None]
     history.sort(key=lambda item: (str(item.get('trained_at_utc') or ''), item['manifest']),
