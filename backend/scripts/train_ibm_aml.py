@@ -31,7 +31,8 @@ from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
 from ibm_history_features import CausalAccountHistory, CausalHistoryStream, HISTORY_FEATURES
-from train_ieee import calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
+from train_ieee import (calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics,
+                        temporal_drift_diagnostics, threshold_analysis)
 
 EXPECTED_HEADER = [
     'Timestamp', 'From Bank', 'Account', 'To Bank', 'Account',
@@ -271,6 +272,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
     if not 0 <= threshold <= 1:
         raise ValueError('Selected threshold cannot be serialized as a model threshold')
     validation_metrics = metrics(y_valid, valid_scores, threshold)
+    validation_drift = temporal_drift_diagnostics(x_train, x_valid, numeric_features, CATEGORICAL)
     validation_metrics['precision_at_1000'] = precision_at_k(y_valid, valid_scores)
     names = pre.get_feature_names_out()
     importance = sorted(zip(names, model.feature_importances_), key=lambda pair: float(pair[1]), reverse=True)
@@ -293,6 +295,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
                              'best_iteration': getattr(model, 'best_iteration', None),
                              'selection_data': 'validation only; final test is never passed to fit'},
         'validation_calibration': calibration_diagnostics(y_valid, valid_scores),
+        'validation_temporal_drift': validation_drift,
         'validation_ranking_metrics': ranking_metrics(y_valid, valid_scores),
         'validation_operating_profiles': operating_profiles(y_valid, valid_scores, threshold),
         'validation_metrics': validation_metrics, 'test_metrics': None, 'baseline_test_metrics': None,

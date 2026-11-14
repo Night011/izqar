@@ -6,7 +6,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_ieee import calibration_diagnostics, operating_profiles, ranking_metrics, split_chronologically, threshold_analysis, train
+from train_ieee import (calibration_diagnostics, operating_profiles, ranking_metrics, split_chronologically,
+                        temporal_drift_diagnostics, threshold_analysis, train)
 
 
 def test_final_holdout_is_fixed_when_training_size_changes():
@@ -63,6 +64,15 @@ def test_calibration_diagnostics_are_bounded_and_not_probability_claims():
     assert 'not calibrated' in report['warning']
     with pytest.raises(ValueError, match=r'\[0, 1\]'):
         calibration_diagnostics(np.array([0, 1]), np.array([-.1, 1.1]))
+
+
+def test_temporal_drift_uses_train_bins_and_reports_unseen_categories():
+    train = pd.DataFrame({'amount': [1., 2., 3., np.nan], 'kind': ['a', 'a', 'b', None]})
+    validation = pd.DataFrame({'amount': [100., 101., np.nan], 'kind': ['a', 'new', None]})
+    report = temporal_drift_diagnostics(train, validation, ['amount'], ['kind'], bins=3)
+    assert report['numeric'][0]['psi_train_binned'] is not None
+    assert report['categorical'][0]['validation_unseen_rate'] == pytest.approx(1 / 3)
+    assert 'does not prove' in report['warning']
 
 
 def test_existing_report_is_not_overwritten(tmp_path):

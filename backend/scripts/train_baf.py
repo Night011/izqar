@@ -27,7 +27,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
-from train_ieee import calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
+from train_ieee import (calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics,
+                        temporal_drift_diagnostics, threshold_analysis)
 
 NUMERIC = [
     'income', 'name_email_similarity', 'prev_address_months_count',
@@ -143,6 +144,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     threshold, threshold_report = threshold_analysis(validation_rows.fraud_bool, valid_scores,
                                                     max_false_alerts_per_10000)
     valid_metrics = metrics(validation_rows.fraud_bool, valid_scores, threshold)
+    validation_drift = temporal_drift_diagnostics(train_rows[FEATURES], validation_rows[FEATURES], NUMERIC, CATEGORICAL)
     encoded = preprocessing.get_feature_names_out()
     importance = sorted(zip(encoded, model.feature_importances_), key=lambda item: float(item[1]), reverse=True)
     report = {
@@ -162,6 +164,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         'experiment': finish_experiment(experiment, started),
         'threshold': float(threshold), 'threshold_analysis': threshold_report,
         'validation_calibration': calibration_diagnostics(validation_rows.fraud_bool, valid_scores),
+        'validation_temporal_drift': validation_drift,
         'validation_ranking_metrics': ranking_metrics(validation_rows.fraud_bool, valid_scores),
         'validation_operating_profiles': operating_profiles(validation_rows.fraud_bool, valid_scores, threshold),
         'validation_metrics': valid_metrics, 'test_metrics': None, 'baseline_test_metrics': None,

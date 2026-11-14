@@ -144,6 +144,55 @@ def calibration_diagnostics(y_true, scores, bins: int = 10) -> dict:
             'warning': 'Diagnostic only. Scores are not calibrated probabilities.'}
 
 
+def temporal_drift_diagnostics(train: pd.DataFrame, validation: pd.DataFrame,
+                               numerical: list[str], categorical: list[str], bins: int = 10) -> dict:
+    """Report validation-period feature shift using train-derived bins only.
+
+    The function is descriptive: it neither changes preprocessing nor model
+    selection.  Quantile cutoffs are fitted exclusively on the train period;
+    validation is observed only after those cutoffs are fixed.  Account IDs
+    and labels must already be excluded by each dataset-specific whitelist.
+    """
+    if bins < 2 or bins > 100 or not numerical and not categorical:
+        raise ValueError('drift diagnostics need features and between 2 and 100 bins')
+    missing = set(numerical + categorical) - set(train.columns) - set(validation.columns)
+    if missing:
+        raise ValueError(f'drift diagnostics missing features: {sorted(missing)}')
+    numeric_report = []
+    for name in numerical:
+        train_series = pd.to_numeric(train[name], errors='coerce')
+        valid_series = pd.to_numeric(validation[name], errors='coerce')
+        train_values = train_series[np.isfinite(train_series)].to_numpy(dtype=float)
+        valid_values = valid_series[np.isfinite(valid_series)].to_numpy(dtype=float)
+        if len(train_values) and len(valid_values):
+            cuts = np.unique(np.quantile(train_values, np.linspace(0, 1, bins + 1)[1:-1]))
+            edges = np.r_[-np.inf, cuts, np.inf]
+            train_counts = np.histogram(train_values, bins=edges)[0].astype(float)
+            valid_counts = np.histogram(valid_values, bins=edges)[0].astype(float)
+            train_share = (train_counts + 1e-6) / (train_counts.sum() + 1e-6 * len(train_counts))
+            valid_share = (valid_counts + 1e-6) / (valid_counts.sum() + 1e-6 * len(valid_counts))
+            psi = float(np.sum((valid_share - train_share) * np.log(valid_share / train_share)))
+        else:
+            psi = None
+        numeric_report.append({'feature': name, 'psi_train_binned': None if psi is None else round(psi, 6),
+                               'train_missing_rate': round(float(train_series.isna().mean()), 6),
+                               'validation_missing_rate': round(float(valid_series.isna().mean()), 6)})
+    categorical_report = []
+    for name in categorical:
+        train_values = train[name].astype('string').fillna('__missing__')
+        valid_values = validation[name].astype('string').fillna('__missing__')
+        known = set(train_values.unique())
+        categorical_report.append({'feature': name, 'train_distinct': int(len(known)),
+                                   'validation_distinct': int(valid_values.nunique()),
+                                   'validation_unseen_rate': round(float((~valid_values.isin(known)).mean()), 6),
+                                   'train_missing_rate': round(float((train_values == '__missing__').mean()), 6),
+                                   'validation_missing_rate': round(float((valid_values == '__missing__').mean()), 6)})
+    return {'train_rows': int(len(train)), 'validation_rows': int(len(validation)),
+            'numeric': sorted(numeric_report, key=lambda item: item['psi_train_binned'] or -1, reverse=True),
+            'categorical': sorted(categorical_report, key=lambda item: item['validation_unseen_rate'], reverse=True),
+            'warning': 'Descriptive validation drift only; it does not prove fraud-rate drift, causal change, or model degradation.'}
+
+
 def operating_profiles(y_true, scores, analyst_threshold: float,
                        monitoring_min_recall: float = .80,
                        high_confidence_min_precision: float = .80) -> dict:
@@ -362,6 +411,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
     validation_scores = classifier.predict_proba(x_valid_transformed)[:, 1]
     threshold, analysis = threshold_analysis(valid_rows['isFraud'].astype(int), validation_scores, max_false_alerts_per_10000)
     validation_metrics = metrics(valid_rows['isFraud'].astype(int), validation_scores, threshold)
+    validation_drift = temporal_drift_diagnostics(x_train, valid_rows[features], nums, cats)
     baseline_validation_scores = baseline.predict_proba(valid_rows[features])[:, 1]
     baseline_validation_metrics = metrics(valid_rows['isFraud'].astype(int), baseline_validation_scores, .5)
     importance = feature_importance(pipeline, features)
@@ -400,6 +450,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
                              'selection_data': 'validation only; final test is never passed to fit'},
         'threshold_analysis': analysis,
         'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), validation_scores),
+        'validation_temporal_drift': validation_drift,
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), validation_scores),
         'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), validation_scores, threshold),
         'feature_importance': importance,
