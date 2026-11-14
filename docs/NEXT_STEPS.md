@@ -114,6 +114,16 @@ API уже умеет безопасно обслужить будущий appro
   --output models\experiments\paysim_pre_transaction_v2_candidate.joblib
 ```
 
+Если после независимого review конфигурация будет явно зафиксирована, единственный допустимый final command требует отдельного acknowledgement и нового пустого output-пути. Не запускайте его для новой настройки и не повторяйте с другим порогом:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_paysim.py `
+  --data <PS_20174392719_1491204439457_log.csv> --full-data --mode final `
+  --feature-set pre_transaction_v2 --frozen-final-feature-set pre_transaction_v2 `
+  --model-version paysim-xgboost-v5 --estimators 180 `
+  --output models\paysim_v5_pre_transaction_v2_sealed.joblib
+```
+
 Сравнивайте с active v1 и weight candidates на одном validation period: общий Recall/F1/PR-AUC, FP/10k, срезы TRANSFER/CASH_OUT и preprocessing stress. Не использовать final test для выбора.
 
 ### Unified IEEE loss weight 1.25 candidate

@@ -10,11 +10,21 @@ pytest.importorskip('sklearn')
 pytest.importorskip('xgboost')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_ieee import train as train_ieee  # noqa: E402
-from train_paysim import train as train_paysim  # noqa: E402
+from train_paysim import train as train_paysim, validate_run_configuration as validate_paysim_run_configuration  # noqa: E402
 from audit_ieee_validation import audit as audit_ieee_validation  # noqa: E402
 from audit_paysim_validation import audit as audit_paysim_validation  # noqa: E402
 from export_portable_model import export as export_portable_model  # noqa: E402
 from install_model_bundle import install as install_model_bundle  # noqa: E402
+
+
+def test_paysim_engineered_final_requires_explicit_freeze():
+    with pytest.raises(ValueError, match='explicit matching frozen'):
+        validate_paysim_run_configuration('final', 1.0, 'pre_transaction_v2', None)
+    with pytest.raises(ValueError, match='exactly match'):
+        validate_paysim_run_configuration('final', 1.0, 'pre_transaction_v2', 'pre_transaction_v1')
+    with pytest.raises(ValueError, match='valid only in final mode'):
+        validate_paysim_run_configuration('experiment', 1.0, 'pre_transaction_v2', 'pre_transaction_v2')
+    validate_paysim_run_configuration('final', 1.0, 'pre_transaction_v2', 'pre_transaction_v2')
 
 
 def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeypatch):
@@ -66,7 +76,7 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert not engineered_pay.exists()
     assert engineered_report['experiment']['hyperparameters']['feature_set'] == 'pre_transaction_v2'
     assert 'amount_to_origin_balance' in engineered_report['features']
-    with pytest.raises(ValueError, match='validation-only'):
+    with pytest.raises(ValueError, match='explicit matching frozen'):
         train_paysim(paysim_path, tmp_path / 'paysim_engineered_final.joblib', 8, None,
                      feature_set='pre_transaction_v2')
     with pytest.raises(FileExistsError, match='Output already exists'):

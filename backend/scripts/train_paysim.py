@@ -72,6 +72,19 @@ def decision_time_features(rows: pd.DataFrame, feature_set: str) -> pd.DataFrame
     return result.loc[:, features]
 
 
+def validate_run_configuration(mode: str, positive_weight_multiplier: float, feature_set: str,
+                               frozen_final_feature_set: str | None) -> None:
+    """Protect the held-out test from accidental candidate iteration."""
+    if mode == 'final' and positive_weight_multiplier != 1.0:
+        raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
+    if frozen_final_feature_set is not None and mode != 'final':
+        raise ValueError('--frozen-final-feature-set is valid only in final mode')
+    if frozen_final_feature_set is not None and frozen_final_feature_set != feature_set:
+        raise ValueError('frozen final feature set must exactly match --feature-set')
+    if mode == 'final' and feature_set != 'pre_transaction_v1' and frozen_final_feature_set != feature_set:
+        raise ValueError('engineered feature candidates require an explicit matching frozen final feature set')
+
+
 def file_provenance(path: Path) -> dict:
     digest = hashlib.sha256()
     with path.open('rb') as stream:
@@ -177,7 +190,7 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
 
 def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None,
           model_version: str = 'paysim-xgboost-v1', mode: str = 'final', positive_weight_multiplier: float = 1.0,
-          feature_set: str = 'pre_transaction_v1'):
+          feature_set: str = 'pre_transaction_v1', frozen_final_feature_set: str | None = None):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
     if not model_version.startswith('paysim-xgboost-v') or not model_version.removeprefix('paysim-xgboost-v').isdigit():
@@ -186,11 +199,8 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         raise ValueError('mode must be experiment or final')
     if not np.isfinite(positive_weight_multiplier) or positive_weight_multiplier <= 0:
         raise ValueError('positive_weight_multiplier must be a finite positive number')
-    if mode == 'final' and positive_weight_multiplier != 1.0:
-        raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
     features, numeric, categorical = feature_schema(feature_set)
-    if mode == 'final' and feature_set != 'pre_transaction_v1':
-        raise ValueError('engineered feature candidates are validation-only; final mode requires pre_transaction_v1')
+    validate_run_configuration(mode, positive_weight_multiplier, feature_set, frozen_final_feature_set)
     if not data_path.is_file():
         raise FileNotFoundError(f'Missing {data_path}. Download PaySim manually from Kaggle and keep it outside Git.')
     data = read_paysim(data_path, max_rows)
@@ -206,7 +216,8 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         split_method='chronological step 70/15/15; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_rows': max_rows, 'max_depth': 4,
                          'learning_rate': .065, 'feature_set': feature_set,
-                         'positive_weight_multiplier': positive_weight_multiplier},
+                         'positive_weight_multiplier': positive_weight_multiplier,
+                         'frozen_final_feature_set': frozen_final_feature_set},
     )
     transform = ColumnTransformer([
         ('numeric', SimpleImputer(strategy='median', add_indicator=True), numeric),
@@ -296,12 +307,15 @@ def main():
     parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
                         help='Experiment-only multiplier over inverse-prevalence class weight')
     parser.add_argument('--feature-set', choices=['pre_transaction_v1', 'pre_transaction_v2'], default='pre_transaction_v1',
-                        help='v2 adds only row-local transformations of API-available pre-transaction fields; experiment only')
+                        help='v2 adds only row-local transformations of API-available pre-transaction fields')
+    parser.add_argument('--frozen-final-feature-set', choices=['pre_transaction_v2'],
+                        help='Required exact acknowledgement before a sealed v2 final run')
     args = parser.parse_args()
     if args.max_rows is not None and args.max_rows < 100:
         parser.error('--max-rows must be at least 100')
     train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows,
-          args.model_version, args.mode, args.positive_weight_multiplier, args.feature_set)
+          args.model_version, args.mode, args.positive_weight_multiplier, args.feature_set,
+          args.frozen_final_feature_set)
 
 
 if __name__ == '__main__':
