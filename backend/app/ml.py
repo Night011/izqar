@@ -76,20 +76,35 @@ def _prepare_legacy_unified_sklearn_types() -> bool:
 
 
 def _repair_legacy_unified_preprocessors(preprocessors) -> bool:
-    """Fill a renamed SimpleImputer cache required by sklearn 1.9 transforms."""
+    """Fill the renamed SimpleImputer cache in reviewed sklearn 1.6 exports.
+
+    Older exports can place the imputer directly in a ``ColumnTransformer``
+    or inside a pipeline.  Walk only fitted transformer containers; this
+    repair restores a derived runtime cache and never changes statistics,
+    feature names, or learned model weights.
+    """
     from sklearn.impute import SimpleImputer
     repaired = False
+    visited: set[int] = set()
+
+    def repair(transformer) -> None:
+        nonlocal repaired
+        if id(transformer) in visited:
+            return
+        visited.add(id(transformer))
+        if (isinstance(transformer, SimpleImputer) and not hasattr(transformer, '_fill_dtype')
+                and hasattr(transformer, '_fit_dtype')):
+            transformer._fill_dtype = transformer._fit_dtype
+            repaired = True
+        if hasattr(transformer, 'named_steps'):
+            for step in transformer.named_steps.values():
+                repair(step)
+        if hasattr(transformer, 'transformers_'):
+            for _, child, _ in transformer.transformers_:
+                repair(child)
+
     for transformer in preprocessors.values():
-        if not hasattr(transformer, 'transformers_'):
-            continue
-        for _, pipeline, _ in transformer.transformers_:
-            if not hasattr(pipeline, 'named_steps'):
-                continue
-            imputer = pipeline.named_steps.get('impute')
-            if (isinstance(imputer, SimpleImputer) and not hasattr(imputer, '_fill_dtype')
-                    and hasattr(imputer, '_fit_dtype')):
-                imputer._fill_dtype = imputer._fit_dtype
-                repaired = True
+        repair(transformer)
     return repaired
 
 
