@@ -86,6 +86,12 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 На validation при лимите 100 FP/10k: PR-AUC `0.120583`, ROC-AUC `0.978720`, Precision `0.063157`, Recall `0.664474`, F1 `0.115349`, FP `7 491`, FN `255`, 98.360 FP/10k и Precision@1000 `0.179`. Score не является калиброванной вероятностью. Это лучший IBM validation candidate на текущем фиксированном окне, но он не является основанием для automatic promotion: прежде чем делать ровно одну final evaluation, надо явно зафиксировать конфигурацию и не менять её по старому final test.
 
+### IEEE-CIS extended_cv weight 1.25 candidate
+
+Kaggle kernel `hoogle57/izqar-ieee-extended-cv-weight-1-25-candidate-v1` завершил one-factor validation-only run на commit `34fda4d25c1ee388815ce21e771999f5d0468dad`. Его единственное отличие от verified `extended_cv` candidate — `positive_weight_multiplier=1.25`; final test не рассчитывался и модель не экспортировалась. ZIP `izqar_ieee_extended_weight125_candidate_report.zip` прошёл integrity check, SHA-256 `58038239a736c347ee21a97aed80c93bfa1fefa2268646daa432b660541962d1`, и уже импортирован в `models/experiments` как candidate.
+
+На fixed validation window (88 581 операций, budget 100 FP/10k): PR-AUC `0.464304`, Precision `0.577458`, Recall `0.395792`, F1 `0.469670`, FP `881`, FN `1 838`, 99.457 FP/10k. Это немного улучшает предыдущий verified candidate, но не является basis для auto-promotion. Следующая final evaluation допустима только один раз после явного freeze выбранной configuration; повторно использовать старый final test для подбора нельзя.
+
 ## Локальные проверки и запуск
 
 ```powershell
