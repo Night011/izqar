@@ -28,6 +28,11 @@ export interface GraphData {
   edges: { source: string; target: string; count: number; total_amount: number; latest_at: string }[];
   indicators: { high_fan_in_accounts: string[]; high_fan_out_accounts: string[]; rapid_transfer_chains: unknown[]; directed_three_node_cycles: string[][]; window_minutes: number; note: string };
 }
+export interface IbmGraphReport {
+  available: boolean; warning: string; source?: string; rows_analyzed?: number; edge_count?: number;
+  limits?: { max_rows: number; rapid_seconds: number; min_degree: number; max_results: number };
+  signal_counts?: { fan_in: number; fan_out: number; rapid_transfer_chains: number; directed_three_node_cycles: number };
+}
 export interface ModelStatus {
   ready: boolean; mode: string; message?: string;
   ieee_cis?: ModelDetail | null;

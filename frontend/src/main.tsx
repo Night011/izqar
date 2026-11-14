@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronRight, CircleHelp, Clock, Cpu, Fingerprint, GitBranch, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Search, Shield, ShieldAlert, ShieldCheck, Wallet, X } from 'lucide-react';
 import { money, request, shortDate } from './api';
-import type { GraphData, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
+import type { GraphData, IbmGraphReport, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
 import './styles.css';
 import './model-summary.css';
 import './investigations.css';
@@ -36,6 +36,7 @@ function App() {
   const [metrics, setMetrics] = useState<Metrics>(blank);
   const [rows, setRows] = useState<Transaction[]>([]);
   const [graph, setGraph] = useState<GraphData>(emptyGraph);
+  const [ibmGraphReport, setIbmGraphReport] = useState<IbmGraphReport | null>(null);
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [tab, setTab] = useState<'overview' | 'investigations' | 'network' | 'ml'>('overview');
@@ -46,13 +47,14 @@ function App() {
   const [search, setSearch] = useState('');
 
   const refresh = useCallback(async (secret: string) => {
-    const [m, t, g, ml] = await Promise.all([
+    const [m, t, g, ml, ibmGraph] = await Promise.all([
       request<Metrics>('/api/v1/metrics', secret),
       request<Transaction[]>('/api/v1/transactions?limit=100', secret),
       request<GraphData>('/api/v1/graph', secret),
       request<ModelStatus>('/api/v1/model/status', secret),
+      request<IbmGraphReport>('/api/v1/graph/ibm-aml-report', secret),
     ]);
-    setMetrics(m); setRows(t); setGraph(g); setModel(ml);
+    setMetrics(m); setRows(t); setGraph(g); setModel(ml); setIbmGraphReport(ibmGraph);
     setSelected(previous => previous ? t.find(tx => tx.id === previous.id) ?? null : null);
     setConnected(true);
     setError('');
@@ -167,6 +169,7 @@ function App() {
           <div className="graph-summary"><Stat label="Счетов в выборке" value={String(graph.nodes.length)} info="Уникальные узлы" icon={<Fingerprint size={19}/>} /><Stat label="Направлений переводов" value={String(graph.edges.length)} info="Рёбра графа" icon={<GitBranch size={19}/>} /><Stat label="Высокий входящий поток" value={String(graph.indicators.high_fan_in_accounts.length)} info="3+ разных отправителя" icon={<ArrowDownLeft size={19}/>} /><Stat label="Высокий исходящий поток" value={String(graph.indicators.high_fan_out_accounts.length)} info="3+ разных получателя" icon={<ArrowUpRight size={19}/>} /></div>
           <section className="panel graph-panel"><div className="panel-header"><div><h2>Финансовая сеть</h2><p>Оранжевым отмечены узлы с повышенной входящей или исходящей связностью</p></div><span className="count-tag">NetworkX + Cytoscape</span></div>{graph.nodes.length ? <Suspense fallback={<LoadingWorkspace />}><Graph data={graph} /></Suspense> : <div className="empty-state big"><GitBranch size={27}/><strong>Нет связей</strong><span>В разделе «Обзор системы» запустите сценарий «Сеть получателей».</span></div>}</section>
           <div className="panel graph-note"><Shield size={20}/><p>{graph.indicators.note || 'Структурные сигналы графа не означают доказанное мошенничество.'}</p></div>
+          <section className="panel"><div className="panel-header"><div><h2>IBM AML · импортированный графовый отчёт</h2><p>Офлайн-анализ HI-Small; в панель передаются только агрегаты без идентификаторов счетов.</p></div><span className="count-tag">{ibmGraphReport?.available ? 'Доступен' : 'Не импортирован'}</span></div>{ibmGraphReport?.available && ibmGraphReport.signal_counts ? <div className="stats-grid"><Stat label="Строк обработано" value={String(ibmGraphReport.rows_analyzed)} info="Ограниченная выборка" icon={<Activity size={19}/>} /><Stat label="Fan-in сигналы" value={String(ibmGraphReport.signal_counts.fan_in)} info="Агрегированно" icon={<ArrowDownLeft size={19}/>} /><Stat label="Fan-out сигналы" value={String(ibmGraphReport.signal_counts.fan_out)} info="Агрегированно" icon={<ArrowUpRight size={19}/>} /><Stat label="Быстрые цепочки" value={String(ibmGraphReport.signal_counts.rapid_transfer_chains)} info="Только прошлая история" icon={<GitBranch size={19}/>} /></div> : <div className="empty-state"><Activity size={25}/><strong>Отчёт IBM AML пока не установлен</strong><span>{ibmGraphReport?.warning ?? 'Статус отчёта загружается.'}</span></div>}<div className="drawer-disclaimer">{ibmGraphReport?.warning ?? 'Структурные сигналы — повод для расследования, не доказательство отмывания.'}</div></section>
         </> : <Suspense fallback={<LoadingWorkspace />}><MLAnalytics status={model} apiKey={key} /></Suspense>}
         <footer>IZQAR · Intelligent Fraud Prevention Platform <span>Research prototype v0.1.0</span></footer>
       </main>

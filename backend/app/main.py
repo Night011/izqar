@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH, validate_config
+from .config import API_KEY, CORS_ORIGINS, BACKEND_ROOT, MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH, IBM_AML_GRAPH_REPORT_PATH, validate_config
 from .database import Base, engine, get_db
 from .models import Transaction, InvestigationEvent, InvestigationMlAssessment
 from .schemas import (TransferIn, TransactionOut, SimulationIn, ReviewIn, CommentIn,
@@ -19,6 +19,7 @@ from .schemas import (TransferIn, TransactionOut, SimulationIn, ReviewIn, Commen
                       MlAssessmentIn, InvestigationMlAssessmentOut)
 from .risk import assess
 from .graph import build_graph
+from .ibm_graph_report import read_public_summary
 from .model_registry import list_registry
 from .model_registry import FORBIDDEN
 from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, load_unified_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml, predict_unified
@@ -224,6 +225,12 @@ def metrics(db: Session = Depends(get_db)):
 @app.get('/api/v1/graph', dependencies=[Depends(require_key)])
 def graph(limit: int = Query(default=500, ge=1, le=1000), window_minutes: int = Query(default=1440, ge=1, le=43_200), db: Session = Depends(get_db)):
     return build_graph(db, limit, window_minutes)
+
+
+@app.get('/api/v1/graph/ibm-aml-report', dependencies=[Depends(require_key)])
+def ibm_aml_graph_report():
+    """Expose only aggregate signals from the optional offline IBM analysis."""
+    return read_public_summary(IBM_AML_GRAPH_REPORT_PATH)
 
 @app.get('/api/v1/model/status', dependencies=[Depends(require_key)])
 def model_status():
