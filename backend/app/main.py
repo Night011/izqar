@@ -235,6 +235,7 @@ def model_status():
                            # selected Unified task rather than guessing a cross-dataset payload.
                            'task_schemas': {task: schema['all'] for task, schema in unified['schema'].items()},
                            'score_kind': 'uncalibrated_ml_score', 'experimental': True,
+                           'preprocessing_compatibility': unified['preprocessing_compatibility'],
                            'final_evaluation_available': bool(unified['final_evaluation']),
                            'final_evaluation_error': unified['final_evaluation_error']}
     return {'ready': bool(artifact or paysim or baf or ibm_aml), 'mode': 'separate_models',

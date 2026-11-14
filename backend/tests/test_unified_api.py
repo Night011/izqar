@@ -4,6 +4,11 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import FunctionTransformer
 
 from app.unified_network import TASKS, required_shapes
@@ -88,3 +93,20 @@ def test_unified_loader_rejects_account_identifier_schema(client, auth, tmp_path
                                json={'features': {'amount': 10, 'nameOrig': 'C123'}})
         assert response.status_code == 503
     ml.load_unified_model.cache_clear()
+
+
+def test_legacy_unified_preprocessor_repair_restores_sklearn_transform_contract():
+    """The 1.6 Unified export needs a private cache restored in sklearn 1.9."""
+    from app.ml import _prepare_legacy_unified_sklearn_types, _repair_legacy_unified_preprocessors
+
+    frame = pd.DataFrame({'amount': [1.0, None, 3.0]})
+    transformer = ColumnTransformer([('numeric', Pipeline([
+        ('impute', SimpleImputer(strategy='median')), ('scale', StandardScaler()),
+    ]), ['amount'])]).fit(frame)
+    imputer = transformer.named_transformers_['numeric'].named_steps['impute']
+    del imputer._fill_dtype
+    assert _repair_legacy_unified_preprocessors({'paysim': transformer}) is True
+    assert np.isfinite(transformer.transform(frame)).all()
+    _prepare_legacy_unified_sklearn_types()
+    import sklearn.compose._column_transformer as column_transformer
+    assert hasattr(column_transformer, '_RemainderColsList')

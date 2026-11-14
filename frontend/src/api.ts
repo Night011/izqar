@@ -41,6 +41,7 @@ export interface UnifiedDetail {
   model_version: string; experimental: true; score_kind: string;
   tasks: Record<string, { threshold: number; validation_metrics: TestMetrics; final_test_metrics?: TestMetrics }>;
   task_schemas: Record<string, string[]>;
+  preprocessing_compatibility?: string | null;
   final_evaluation_available: boolean;
   final_evaluation_error: string | null;
 }

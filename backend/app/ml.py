@@ -18,6 +18,59 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _prepare_legacy_unified_sklearn_types() -> bool:
+    """Restore the harmless list subclass removed after scikit-learn 1.6.
+
+    The reviewed Unified run was created with scikit-learn 1.6.1. Its
+    ``ColumnTransformer`` pickle names this private list subclass, while the
+    local runtime intentionally stays on 1.9.1 for specialist artifacts.
+    The model uses ``remainder='drop'``; recreating the list container lets
+    the trusted pickle deserialize without changing features.
+    """
+    from sklearn.compose import _column_transformer as column_transformer
+    if hasattr(column_transformer, '_RemainderColsList'):
+        return False
+
+    class _RemainderColsList(list):
+        pass
+
+    column_transformer._RemainderColsList = _RemainderColsList
+    return True
+
+
+def _repair_legacy_unified_preprocessors(preprocessors) -> bool:
+    """Fill a renamed SimpleImputer cache required by sklearn 1.9 transforms."""
+    from sklearn.impute import SimpleImputer
+    repaired = False
+    for transformer in preprocessors.values():
+        if not hasattr(transformer, 'transformers_'):
+            continue
+        for _, pipeline, _ in transformer.transformers_:
+            if not hasattr(pipeline, 'named_steps'):
+                continue
+            imputer = pipeline.named_steps.get('impute')
+            if (isinstance(imputer, SimpleImputer) and not hasattr(imputer, '_fill_dtype')
+                    and hasattr(imputer, '_fit_dtype')):
+                imputer._fill_dtype = imputer._fit_dtype
+                repaired = True
+    return repaired
+
+
+def _load_unified_preprocessors(path: Path):
+    """Load the trusted preprocessing export, including the reviewed 1.6 shim."""
+    import warnings
+    from sklearn.exceptions import InconsistentVersionWarning
+
+    legacy_list = _prepare_legacy_unified_sklearn_types()
+    # The mismatch is exposed in model status. Avoid logging it for every
+    # process that loads the cached artifact.
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', InconsistentVersionWarning)
+        preprocessors = joblib.load(path)
+    repaired = _repair_legacy_unified_preprocessors(preprocessors)
+    return preprocessors, legacy_list or repaired
+
+
 def _load_unified_final_evaluation(path: Path, report: dict, weights: Path, preprocessors: Path):
     """Read an optional final report only when it matches the serving export."""
     final_path = path.with_name(path.name.removesuffix('.metrics.json') + '.final_test.json')
@@ -144,12 +197,13 @@ def load_unified_model():
         preprocessors_path = path.with_name(stem + '_preprocessors.joblib')
         if not weights.is_file() or not preprocessors_path.is_file():
             raise ValueError('unified model component missing')
-        preprocessors = joblib.load(preprocessors_path)
+        preprocessors, preprocessing_compatibility = _load_unified_preprocessors(preprocessors_path)
         if set(preprocessors) != set(UNIFIED_TASKS):
             raise ValueError('preprocessor task mismatch')
         network = UnifiedNetwork.from_npz(weights, dimensions)
         final_evaluation, final_evaluation_error = _load_unified_final_evaluation(path, report, weights, preprocessors_path)
         return {'report': report, 'network': network, 'preprocessors': preprocessors, 'schema': schema,
+                'preprocessing_compatibility': ('sklearn_1_6_to_1_9_adapter' if preprocessing_compatibility else None),
                 'final_evaluation': final_evaluation, 'final_evaluation_error': final_evaluation_error}
     except Exception as exc:
         raise RuntimeError(f'Unable to load unified model artifact ({type(exc).__name__})') from exc

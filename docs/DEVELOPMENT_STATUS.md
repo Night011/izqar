@@ -10,7 +10,7 @@
 | IEEE-CIS v2 | Установлена, API проверен | test: F1 0.464247, PR-AUC 0.444182, 1 148 FP / 1 804 FN | Онлайн-платежи, не граф переводов; скор не калиброван |
 | BAF Base v1 | Установлена, API проверен | test: F1 0.241141, PR-AUC 0.199692, 731 FP / 1 132 FN | Синтетические заявки; низкий Recall 0.207283 |
 | IBM AML HI-Small v1 | Установлена, API проверен | test: F1 0.115342, PR-AUC 0.101293, 15 465 FP / 519 FN | На test 202.925 ложных тревог/10k против validation-бюджета 100; не менять порог по этому test |
-| Unified Intelligence v1 | Kaggle CPU validation-only run завершён на четырёх входах; artifact ещё не экспортирован локально | PaySim PR-AUC 0.037139 / F1 0.050000; IEEE PR-AUC 0.188936 / F1 0.265172; BAF PR-AUC 0.137183 / F1 0.223346; IBM AML PR-AUC 0.013440 / F1 0.037538 | Это не final test и не основание заменить специализированные модели; scores не калиброваны |
+| Unified Intelligence v1 | Установлена из проверенного Kaggle ZIP; API проверен для всех четырёх heads | PaySim PR-AUC 0.037139 / F1 0.050000; IEEE PR-AUC 0.188936 / F1 0.265172; BAF PR-AUC 0.137183 / F1 0.223346; IBM AML PR-AUC 0.013440 / F1 0.037538 | Это validation-only, не final test и не основание заменить специализированные модели; scores не калиброваны |
 
 ### Unified Intelligence v1 — Kaggle validation-only, 14 ноября 2026
 
@@ -29,15 +29,16 @@ Gradient audit для общей backbone был ненулевым: PaySim `0.2
 
 - React: мониторинг, Model Registry, ML Analytics, интерактивный NetworkX/Cytoscape граф и рабочее место расследований. Граф ограниченно показывает fan-in/fan-out, быстрые цепочки и направленные трёхузловые циклы как сигналы, а не доказательства.
 - Backend: четыре специализированных endpoint-инференса; очередь расследований, статусы, комментарии и append-only `investigation_events` для синтетических переводов.
-- Unified endpoint: `POST /api/v1/unified/{paysim|ieee_cis|baf_base|ibm_aml}/predict` подготовлен, но честно возвращает 503 до установки совместно обученного артефакта. После установки `/api/v1/model/status` выдаёт точную схему каждой головы (без меток), а ML Analytics позволяет выбрать Unified-задачу и сформировать валидный запрос.
-- Специализированные API локально проверены через FastAPI `TestClient`: PaySim, IEEE-CIS, BAF Base и IBM AML ответили `200` с установленными версиями артефактов. Unified не выдавался за доступный: он отсутствует до доверенного локального экспорта.
+- Unified endpoint: `POST /api/v1/unified/{paysim|ieee_cis|baf_base|ibm_aml}/predict` установлен и проверен через FastAPI `TestClient`: все четыре heads вернули `200` с точной schema из manifest. `/api/v1/model/status` показывает экспериментальный статус, validation-only метрики и schema без меток.
+- Специализированные API и Unified загружены одновременно: PaySim, IEEE-CIS, BAF Base, IBM AML и Unified имеют `artifact_errors: null`; `ready: true`.
 - Frontend production build разделён по вкладкам: начальный JS уменьшен с 731.84 kB до 256.45 kB; Cytoscape/Network Explorer и рабочие пространства расследований/ML загружаются только при открытии нужной вкладки.
 - Unified trainer поддерживает `--mode final`: это отдельная однократная оценка уже зафиксированного validation-экспорта. Она не обучает веса и не перезаписывает serving-манифест, а создаёт `unified.final_test.json` с SHA-256 компонентов и неизменёнными validation-порогами. Пока этот режим не запускался на реальных данных.
 - Если однократный final-отчёт появится, API сверяет его тип, версию, четыре задачи, validation-пороги и SHA-256 manifest/weights/preprocessing перед показом метрик. Некорректный отчёт исключается из UI, но не мешает безопасному Unified-инференсу по установленным весам.
 - ML Analytics содержит Model Comparison: она сопоставляет сохранённые метрики специализированной и Unified-модели по каждому источнику, но явно не делает вывод о превосходстве, пока не доказан один и тот же заранее зафиксированный holdout.
-- Для экспорта Unified подготовлен `scripts/install_unified_artifact.py`: он принимает только архив текущего Kaggle validation-run с четырьмя зафиксированными SHA-256, проверяет ZIP до записи и не перезаписывает уже установленные компоненты. 14 ноября ссылка на ZIP была подтверждена в завершённом Kaggle notebook, но браузерная автоматизация не подтвердила загрузку и в `F:\download` файла пока нет; этот путь ещё не выполнен на реальном экспорте.
-- Локальная проверка: `44 passed` backend-тестов (одно предупреждение Starlette о будущей deprecation) и production React build прошли. В том числе проверены Unified adapter protocol, NumPy shared-backbone inference, 503 при отсутствии артефакта, загрузка тестового доверенного экспорта, отказ небезопасной feature schema и выдача Unified serving-схемы через status API.
-- Последняя проверка реального локального сервера: `scripts/start_local.ps1 -ConfigureOnly` подтвердил существующую конфигурацию без печати или изменения API-ключа. Временный Uvicorn smoke test с отдельной SQLite БД вернул `200` для `/health`, `401` для защищённого status без ключа и `200` для status с временным тестовым ключом; четыре специализированные модели были готовы. Unified по-прежнему не выдаётся за доступный до доверенной установки ZIP.
+- Для экспорта Unified подготовлен `scripts/install_unified_artifact.py`: он принял ZIP из `C:\Users\a\Downloads\izqar_unified_artifacts.zip`, сверил все четыре зафиксированные SHA-256 и установил компоненты без ручного извлечения. Chrome сохранял ZIP в `C:\Users\a\Downloads`, а не в `F:\download`.
+- Kaggle preprocessing создан в scikit-learn 1.6.1, тогда как четыре специализированных portable-артефакта требуют локальный 1.9.1. Вместо downgrade всего runtime Unified loader использует узкий adapter для доверенного legacy `ColumnTransformer` и `SimpleImputer`; status явно сообщает `sklearn_1_6_to_1_9_adapter`. Модель не переобучалась.
+- Локальная проверка: `45 passed` backend-тестов (одно предупреждение Starlette о будущей deprecation) и production React build прошли. В том числе проверены Unified adapter protocol, NumPy shared-backbone inference, schema safety, loader compatibility и выдача Unified serving-схемы через status API.
+- Последняя проверка реального локального сервера: `scripts/start_local.ps1 -ConfigureOnly` подтвердил существующую конфигурацию без печати или изменения API-ключа. Временный Uvicorn smoke test с отдельной SQLite БД вернул `200` для `/health`, `401` для защищённого status без ключа и `200` для status с временным тестовым ключом; пять моделей теперь готовы для локального инференса.
 
 ## Последние проверенные коммиты
 
@@ -49,8 +50,7 @@ Gradient audit для общей backbone был ненулевым: PaySim `0.2
 
 ## Не закрыто
 
-1. Скачать уже подготовленный в завершённой Kaggle-сессии `izqar_unified_artifacts.zip` (содержит `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` и `unified_checkpoint.pt`) в `F:\download`. Не использовать final test для выбора параметров.
-2. Установить только доверенный экспорт, проверить Unified API и добавить его в Model Registry и React, показав именно validation-only метрики и экспериментальный статус.
-3. Продолжить validation-only исследования улучшения IBM AML, BAF, IEEE и PaySim; прежние финальные test не переиспользовать для выбора.
-4. Ввести ML-оценки как самостоятельные сохраняемые инциденты без подмены их Rule Engine переводами.
-5. Расширить временный граф IBM AML на данных Kaggle, не выдавая графовый сигнал за подтверждённое отмывание.
+1. Не запускать Unified final test для подбора параметров. Если решение о конфигурации зафиксировано, выполнить ровно одну изолированную final-оценку в Kaggle по документированной команде ниже.
+2. Продолжить validation-only исследования улучшения IBM AML, BAF, IEEE и PaySim; прежние финальные test не переиспользовать для выбора.
+3. Ввести ML-оценки как самостоятельные сохраняемые инциденты без подмены их Rule Engine переводами.
+4. Расширить временный граф IBM AML на данных Kaggle, не выдавая графовый сигнал за подтверждённое отмывание.

@@ -1,20 +1,20 @@
 # IZQAR — продолжение работы
 
-## Сначала: Unified Intelligence в Kaggle
+## Unified Intelligence: текущее состояние
 
 1. Notebook уже выполнен в Kaggle на commit `6f91892ac1062425f2a34a822dd617ee38f3b8cc`; не перезапускайте его ради подбора параметров.
 2. Через **Add Input** подключите: `ealaxi/paysim1`, `ieee-fraud-detection`, `sgpjesus/bank-account-fraud-dataset-neurips-2022`, `ealtman2019/ibm-transactions-for-anti-money-laundering-aml`. Условия IEEE-CIS принимает только владелец аккаунта.
 3. Включите Internet только для клонирования feature-ветки и зависимостей. Исходные CSV не скачивать в локальный репозиторий.
-4. В завершённой сессии уже создан `izqar_unified_artifacts.zip` только из `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` и `unified_checkpoint.pt`. Скачайте его по ссылке **Download validated IZQAR Unified artifacts ZIP** в `F:\download`; не создавайте новый архив и не меняйте компоненты.
+4. `izqar_unified_artifacts.zip` уже скачан в `C:\Users\a\Downloads` и установлен штатным установщиком. Не заменяйте файлы в `backend/models/` вручную.
 5. Сохраните вывод ячеек, commit SHA, размеры выборок, validation метрики, `gradient_audit_shared_backbone_l2`, `training.seconds` и checkpoint. До сравнения не называйте модель лучше специализированных.
 
-## После экспорта
+## Повторяемая проверка установленного Unified
 
-1. Скачайте `izqar_unified_artifacts.zip`, затем безопасно установите все четыре проверенные компонента одной командой. Установщик сверяет зафиксированные SHA-256 и откажется от подменённого архива или перезаписи существующего артефакта:
+Если артефакты были удалены, безопасная повторная установка принимает только проверенный ZIP и откажется от подмены или перезаписи:
 
 ```powershell
 cd C:\Users\a\Documents\IZQAR-MVP\backend
-.\.venv\Scripts\python.exe scripts\install_unified_artifact.py --archive "F:\download\izqar_unified_artifacts.zip"
+.\.venv\Scripts\python.exe scripts\install_unified_artifact.py --archive "C:\Users\a\Downloads\izqar_unified_artifacts.zip"
 ```
 
 Не извлекайте ZIP вручную в `models/`: это обходит проверку происхождения. Скрипт сохранит `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` и `unified_checkpoint.pt`.
@@ -53,4 +53,4 @@ npm run build
 
 ## Текущий handoff
 
-Kaggle вкладка оставлена открытой с успешным validation-only output и четырьмя файлами в `/kaggle/working/izqar_unified_mtl_v1`. Локально требуется только доверенный экспорт артефактов; `.vscode/` остаётся пользовательским неотслеживаемым каталогом.
+Kaggle вкладка содержит успешный validation-only output и четыре файла в `/kaggle/working/izqar_unified_mtl_v1`. Доверенный export установлен локально; все четыре Unified API heads проверены. `.vscode/` остаётся пользовательским неотслеживаемым каталогом.
