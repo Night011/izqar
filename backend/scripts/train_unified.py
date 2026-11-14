@@ -35,6 +35,24 @@ TASKS = ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')
 RNG = 42
 
 
+def parse_task_weights(raw: str | None) -> dict[str, float]:
+    """Parse explicit per-task loss weights; no task may silently disappear."""
+    if raw is None:
+        return {name: 1.0 for name in TASKS}
+    try:
+        weights = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError('--task-weights must be a JSON object') from exc
+    if not isinstance(weights, dict) or set(weights) != set(TASKS):
+        raise ValueError(f'--task-weights must contain exactly {list(TASKS)}')
+    parsed = {}
+    for name, value in weights.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
+            raise ValueError('each task weight must be a finite positive number')
+        parsed[name] = float(value)
+    return parsed
+
+
 def metrics(y, scores, threshold):
     predicted = (scores >= threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(y, predicted, labels=[0, 1]).ravel()
@@ -226,10 +244,14 @@ def main():
     parser.add_argument('--epochs', type=int, default=12)
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--device', default='auto', choices=['auto','cpu','cuda'])
+    parser.add_argument('--task-weights', default=None,
+                        help='JSON positive loss weights for paysim, ieee_cis, baf_base and ibm_aml; experiment mode only')
     args = parser.parse_args()
     if min(args.max_train_rows, args.max_validation_rows, args.epochs, args.batch_size) < 1 or (args.max_final_rows is not None and args.max_final_rows < 1):
         parser.error('all limits must be positive')
     if args.mode == 'final':
+        if args.task_weights is not None:
+            parser.error('--task-weights is a training experiment option and cannot be used with final evaluation')
         result = final_evaluation(args)
         print(json.dumps({'final_evaluation': str(args.output_dir / 'unified.final_test.json'), 'tasks': result['tasks']}, ensure_ascii=False, indent=2))
         return
@@ -240,6 +262,7 @@ def main():
     except ImportError as exc:
         raise RuntimeError('PyTorch is required only for Kaggle training; local inference does not require it.') from exc
     random.seed(RNG); np.random.seed(RNG); torch.manual_seed(RNG)
+    task_weights = parse_task_weights(args.task_weights)
     device = resolve_device(args.device, torch.cuda.is_available())
     sources = {'paysim': lambda: paysim(args.paysim, args.max_train_rows), 'ieee_cis': lambda: ieee(args.ieee_dir, args.max_train_rows),
                'baf_base': lambda: baf(args.baf, args.max_train_rows), 'ibm_aml': lambda: ibm(args.ibm_aml, args.max_train_rows)}
@@ -262,7 +285,7 @@ def main():
     gradient_audit = {}
     for name in TASKS:
         x, y, _, _ = prepared[name]; take = min(len(x), args.batch_size); optimiser.zero_grad(set_to_none=True)
-        loss = F.binary_cross_entropy_with_logits(model(name, torch.tensor(x[:take], device=device)), torch.tensor(y[:take], device=device), pos_weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device)); loss.backward()
+        loss = task_weights[name] * F.binary_cross_entropy_with_logits(model(name, torch.tensor(x[:take], device=device)), torch.tensor(y[:take], device=device), pos_weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device)); loss.backward()
         gradient_audit[name] = round(float(model.shared[0].weight.grad.norm().detach().cpu()), 8)
     if any(value <= 0 for value in gradient_audit.values()): raise RuntimeError(f'No shared-backbone gradient: {gradient_audit}')
     best, best_state, history = float('-inf'), None, []
@@ -274,7 +297,7 @@ def main():
             for start in range(0, limit, args.batch_size):
                 ix=order[start:start+args.batch_size]; xb=torch.tensor(x[ix],device=device); yb=torch.tensor(y[ix],device=device)
                 weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device); optimiser.zero_grad(set_to_none=True)
-                loss=F.binary_cross_entropy_with_logits(model(name, xb),yb,pos_weight=weight); loss.backward(); optimiser.step(); values.append(float(loss.detach().cpu()))
+                loss=task_weights[name] * F.binary_cross_entropy_with_logits(model(name, xb),yb,pos_weight=weight); loss.backward(); optimiser.step(); values.append(float(loss.detach().cpu()))
             losses[name]=round(float(np.mean(values)),6)
         model.eval(); score=0; epoch_metrics={}
         with torch.no_grad():
@@ -294,7 +317,7 @@ def main():
     with torch.no_grad():
         for name in TASKS:
             _,_,x,y=prepared[name]; scores=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); threshold=choose_threshold(y,scores); outputs[name]={'threshold':threshold,'validation_metrics':metrics(y,scores,threshold)}
-    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1','trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1','tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,'loss':'per-task positive-weighted BCE, equal task update rounds','seed':RNG,'best_validation_pr_auc_sum':best,'seconds':round(time.monotonic()-started,3),'history':history},'task_metadata':metadata,'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
+    report={'format_version':1,'model_kind':'izqar_unified_mtl','model_version':'izqar-unified-mtl-v1','trained_at_utc':datetime.now(timezone.utc).isoformat(),'serialization':'numpy_shared_backbone_v1','tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,'loss':'per-task positive-weighted BCE with explicit task weights and equal task update rounds','task_weights':task_weights,'seed':RNG,'best_validation_pr_auc_sum':best,'seconds':round(time.monotonic()-started,3),'history':history},'task_metadata':metadata,'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
     (args.output_dir/'unified.metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps({'output':str(args.output_dir),'tasks':outputs,'gradient_audit':gradient_audit},ensure_ascii=False,indent=2))
 

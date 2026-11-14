@@ -12,7 +12,7 @@ from sklearn.preprocessing import FunctionTransformer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from app.unified_network import TASKS, required_shapes
-from train_unified import baf, balanced_cap, choose_threshold, final_evaluation, ieee, metrics, resolve_device, transformer  # noqa: E402
+from train_unified import baf, balanced_cap, choose_threshold, final_evaluation, ieee, metrics, parse_task_weights, resolve_device, transformer  # noqa: E402
 
 
 def test_training_adapter_is_train_fitted_and_handles_unknown_categories():
@@ -22,6 +22,16 @@ def test_training_adapter_is_train_fitted_and_handles_unknown_categories():
     output = pre.transform(valid)
     assert output.shape[0] == 2
     assert np.isfinite(output.toarray() if hasattr(output, 'toarray') else output).all()
+
+
+def test_task_weights_are_complete_positive_and_explicit():
+    assert parse_task_weights(None) == {'paysim': 1.0, 'ieee_cis': 1.0, 'baf_base': 1.0, 'ibm_aml': 1.0}
+    custom = parse_task_weights('{"paysim": 1.5, "ieee_cis": 1, "baf_base": 0.5, "ibm_aml": 2}')
+    assert custom['paysim'] == 1.5 and custom['ibm_aml'] == 2.0
+    with pytest.raises(ValueError, match='exactly'):
+        parse_task_weights('{"paysim": 1}')
+    with pytest.raises(ValueError, match='positive'):
+        parse_task_weights('{"paysim": 1, "ieee_cis": 1, "baf_base": 0, "ibm_aml": 1}')
 
 
 def test_capping_preserves_temporal_order_and_validation_metrics_are_complete():

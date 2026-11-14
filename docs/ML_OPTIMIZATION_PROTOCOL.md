@@ -48,6 +48,14 @@ cd backend
 
 Не запускайте `--mode final` для настройки этих старых holdout. Для Unified остаётся отдельная sealed one-time final процедура из [NEXT_STEPS.md](NEXT_STEPS.md).
 
+Для Unified task-balancing experiment передайте все четыре веса явно, например:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_unified.py --paysim <PaySim.csv> --ieee-dir <ieee-dir> --baf <Base.csv> --ibm-aml <HI-Small_Trans.csv> --output-dir models\experiments\unified_task_weight_01 --mode experiment --task-weights '{"paysim":1.0,"ieee_cis":1.25,"baf_base":1.25,"ibm_aml":1.5}'
+```
+
+Это не ensemble и не routing: веса масштабируют BCE-loss каждой головы, поэтому все задачи продолжают обновлять общий backbone. Конфигурация попадает в `training.task_weights` манифеста. Нельзя передавать этот параметр в sealed `--mode final`.
+
 Для controlled class-imbalance кандидата добавьте `--positive-weight-multiplier 0.75`, `1.25` или `1.5` к одной из первых трёх команд. Это multiplier поверх inverse-prevalence веса; сравнивайте только одинаковые validation split, все operating profile и Precision@K. Любое значение отличное от `1.0` намеренно блокирует `--mode final`.
 
 `scripts/ibm_history_features.py` реализует prior outgoing/incoming counts, amounts и time-since-activity. Его `CausalHistoryStream` удерживает последнюю timestamp-группу между CSV chunks, поэтому одинаковое время не даёт операциям увидеть друг друга. Account остаётся только ключом истории. `train_ibm_aml.py --feature-set causal_history_v1` подключает эти признаки **только** к experiment candidate и блокирует `--mode final`; активный IBM артефакт не изменяется.
