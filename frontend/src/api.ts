@@ -42,10 +42,16 @@ export interface ModelStatus {
   unified_mtl?: UnifiedDetail | null;
   artifact_errors?: { ieee_cis?: string | null; paysim?: string | null; baf_base?: string | null; ibm_aml?: string | null; unified_mtl?: string | null };
 }
+export interface TemporalDrift {
+  train_rows: number; validation_rows: number; warning: string;
+  numeric: { feature: string; psi_train_binned: number | null; train_missing_rate: number; validation_missing_rate: number }[];
+  categorical: { feature: string; train_distinct: number; validation_distinct: number; validation_unseen_rate: number; train_missing_rate: number; validation_missing_rate: number }[];
+}
 export interface UnifiedDetail {
   model_version: string; experimental: true; score_kind: string;
   tasks: Record<string, { threshold: number; validation_metrics: TestMetrics; final_test_metrics?: TestMetrics }>;
   task_schemas: Record<string, string[]>;
+  task_temporal_drift?: Record<string, TemporalDrift>;
   preprocessing_compatibility?: string | null;
   final_evaluation_available: boolean;
   final_evaluation_error: string | null;
@@ -69,6 +75,7 @@ export interface ModelDetail {
     missing_balances_every_tenth_row: { affected_rows: number; metrics: TestMetrics; recall_delta_vs_unmodified: number };
     unseen_type_encoding: { synthetic_category: string; cases: number; mean_score_delta_vs_unmodified: number; flagged_rate_unmodified: number; flagged_rate_with_unseen_type: number };
   } | null;
+  validation_temporal_drift?: TemporalDrift | null;
   feature_importance: { feature: string; importance: number }[];
 }
 export interface ModelPrediction {

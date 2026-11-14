@@ -293,6 +293,7 @@ def model_status():
                 # validation diagnostics, never live scoring inputs or labels.
                 'validation_type_slices': artifact.get('validation_type_slices'),
                 'validation_robustness': artifact.get('validation_robustness'),
+                'validation_temporal_drift': artifact.get('validation_temporal_drift'),
                 'feature_importance': artifact.get('feature_importance', {}).get('top_30', [])[:10]}
     try:
         artifact = load_model()
@@ -335,6 +336,9 @@ def model_status():
                            # React console needs it to construct an exact, validated request for a
                            # selected Unified task rather than guessing a cross-dataset payload.
                            'task_schemas': {task: schema['all'] for task, schema in unified['schema'].items()},
+                           'task_temporal_drift': {task: metadata['validation_temporal_drift']
+                                                   for task, metadata in unified['report'].get('task_metadata', {}).items()
+                                                   if isinstance(metadata, dict) and metadata.get('validation_temporal_drift')},
                            'score_kind': 'uncalibrated_ml_score', 'experimental': True,
                            'preprocessing_compatibility': unified['preprocessing_compatibility'],
                            'final_evaluation_available': bool(unified['final_evaluation']),

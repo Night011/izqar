@@ -19,7 +19,12 @@ def make_artifact(root: Path):
               'model_version': 'izqar-unified-mtl-test', 'serialization': 'numpy_shared_backbone_v1',
               'input_dimensions': {task: 1 for task in TASKS},
               'tasks': {task: {'threshold': .5, 'validation_metrics': {'f1': .1}} for task in TASKS},
-              'task_metadata': {task: {'feature_schema': {'all': ['amount'], 'numerical': ['amount'], 'categorical': []}}
+              'task_metadata': {task: {'feature_schema': {'all': ['amount'], 'numerical': ['amount'], 'categorical': []},
+                                       'validation_temporal_drift': {
+                                           'train_rows': 10, 'validation_rows': 4,
+                                           'numeric': [{'feature': 'amount', 'psi_train_binned': .12,
+                                                        'train_missing_rate': 0.0, 'validation_missing_rate': .25}],
+                                           'categorical': [], 'warning': 'diagnostic only'}}
                                 for task in TASKS}}
     manifest = root / 'unified.metrics.json'
     manifest.write_text(json.dumps(report), encoding='utf-8')
@@ -67,6 +72,7 @@ def test_unified_missing_or_valid_cpu_artifact(client, auth, tmp_path, monkeypat
         status = client.get('/api/v1/model/status', headers=auth)
         assert status.status_code == 200
         assert status.json()['unified_mtl']['task_schemas'] == {task: ['amount'] for task in TASKS}
+        assert status.json()['unified_mtl']['task_temporal_drift']['paysim']['numeric'][0]['feature'] == 'amount'
         assert status.json()['unified_mtl']['final_evaluation_available'] is True
         assert status.json()['unified_mtl']['tasks']['paysim']['final_test_metrics']['cases'] == 12
         (tmp_path / 'unified.final_test.json').write_text('{}', encoding='utf-8')

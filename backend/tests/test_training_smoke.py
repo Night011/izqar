@@ -154,6 +154,7 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
         assert status.json()['paysim']['validation_operating_profiles']['analyst_review']['metrics']['cases'] > 0
         assert status.json()['paysim']['validation_type_slices']['TRANSFER']['available'] is True
         assert status.json()['paysim']['validation_robustness']['scope'] == 'validation_only_synthetic_preprocessing_stress'
+        assert status.json()['paysim']['validation_temporal_drift']['numeric'][0]['feature'] in pay_report['numerical_features']
         pay_features = {'type': 'TRANSFER', 'amount': 25, 'oldbalanceOrg': 110, 'oldbalanceDest': 5}
         pay_response = client.post('/api/v1/paysim/predict', json={'features': pay_features}, headers=auth)
         assert pay_response.status_code == 200, pay_response.text
