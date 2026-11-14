@@ -117,6 +117,7 @@ function App() {
       <div className="system-row"><span className={'status-dot ' + (model?.paysim ? '' : 'amber')} /> PaySim ML <span>{model?.paysim ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.baf_base ? '' : 'amber')} /> BAF Base ML <span>{model?.baf_base ? 'Обучена' : 'Нет модели'}</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.ibm_aml ? '' : 'amber')} /> IBM AML ML <span>{model?.ibm_aml ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.unified_mtl ? '' : 'amber')} /> Unified MTL <span>{model?.unified_mtl ? 'Эксперимент' : 'Нет модели'}</span></div>
       <div className="side-bottom"><div className="mini-shield"><ShieldCheck size={17} /></div><div><strong>Hackathon MVP</strong><span>Локальная симуляция</span></div></div>
     </aside>
 
