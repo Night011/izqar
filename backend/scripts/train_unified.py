@@ -9,6 +9,7 @@ through ``app.unified_network`` without PyTorch.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -28,6 +29,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from train_baf import CATEGORICAL as BAF_CATS, FEATURES as BAF_FEATURES, NUMERIC as BAF_NUMS, read_base, split_months
 from train_ibm_aml import load_splits as ibm_splits, time_boundaries as ibm_boundaries, validate_file as validate_ibm
+from app.unified_network import UnifiedNetwork
 
 TASKS = ('paysim', 'ieee_cis', 'baf_base', 'ibm_aml')
 RNG = 42
@@ -56,7 +58,7 @@ def choose_threshold(y, scores):
 
 def balanced_cap(frame, target, cap):
     """Chronology is retained; deterministic uniform thinning prevents RAM spikes."""
-    if len(frame) <= cap:
+    if cap is None or len(frame) <= cap:
         return frame.reset_index(drop=True), target
     index = np.linspace(0, len(frame) - 1, cap, dtype=np.int64)
     return frame.iloc[index].reset_index(drop=True), np.asarray(target)[index]
@@ -70,18 +72,20 @@ def transformer(numbers, categories):
     ])
 
 
-def paysim(path, cap):
+def paysim(path, cap, include_test=False):
     required = ['step', 'type', 'amount', 'oldbalanceOrg', 'oldbalanceDest', 'isFraud']
     data = pd.read_csv(path, usecols=required, dtype={'step':'int32','amount':'float32','oldbalanceOrg':'float32','oldbalanceDest':'float32','isFraud':'int8','type':'category'})
     data = data.sort_values('step', kind='stable').reset_index(drop=True)
     first, second = data.step.iloc[int(.70 * len(data))], data.step.iloc[int(.85 * len(data))]
     train, valid = data[data.step < first], data[(data.step >= first) & (data.step < second)]
+    test = data[data.step >= second]
     fields = ['type','amount','oldbalanceOrg','oldbalanceDest']
-    return (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields[:1], fields[1:],
-            {'method':'70/15/15 chronological step; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','isFlaggedFraud','newbalanceOrig','newbalanceDest','nameOrig','nameDest','step']})
+    result = (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields[:1], fields[1:],
+              {'method':'70/15/15 chronological step; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','isFlaggedFraud','newbalanceOrig','newbalanceDest','nameOrig','nameDest','step']})
+    return (*result, test[fields], test.isFraud.to_numpy()) if include_test else result
 
 
-def ieee(data_dir, cap):
+def ieee(data_dir, cap, include_test=False):
     tx = pd.read_csv(data_dir / 'train_transaction.csv', usecols=['TransactionID','TransactionDT','TransactionAmt','card1','card2','card3','card5','addr1','dist1','ProductCD','card4','card6','P_emaildomain','isFraud'], low_memory=False)
     tx = tx.sort_values(['TransactionDT','TransactionID'], kind='stable').reset_index(drop=True)
     first, second = tx.TransactionDT.iloc[int(.70 * len(tx))], tx.TransactionDT.iloc[int(.85 * len(tx))]
@@ -96,29 +100,33 @@ def ieee(data_dir, cap):
     fields_cat = ['ProductCD','card4','card6','P_emaildomain','DeviceType','DeviceInfo','id_31']
     fields = fields_num + fields_cat
     train, valid = tx[tx.TransactionDT < first], tx[(tx.TransactionDT >= first) & (tx.TransactionDT < second)]
-    return (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields_cat, fields_num,
-            {'method':'70/15/15 chronological TransactionDT; identity left-joined one_to_one; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','TransactionID','TransactionDT']})
+    test = tx[tx.TransactionDT >= second]
+    result = (train[fields], train.isFraud.to_numpy(), valid[fields], valid.isFraud.to_numpy(), fields_cat, fields_num,
+              {'method':'70/15/15 chronological TransactionDT; identity left-joined one_to_one; final 15% sealed and never loaded for tuning', 'excluded':['isFraud','TransactionID','TransactionDT']})
+    return (*result, test[fields], test.isFraud.to_numpy()) if include_test else result
 
 
-def baf(path, cap):
+def baf(path, cap, include_test=False):
     data = read_base(path)
     # ``split_months`` returns both the three chronological partitions and
     # their audit boundaries.  Keep the last month sealed: this validation
     # experiment must not materialise it at all.
-    (train, valid, _sealed_test), _boundaries = split_months(data)
-    return (train[BAF_FEATURES], train.fraud_bool.to_numpy(), valid[BAF_FEATURES], valid.fraud_bool.to_numpy(), BAF_CATS, BAF_NUMS,
-            {'method':'earlier months train, penultimate validation, final month sealed', 'excluded':['fraud_bool','month','device_fraud_count','days_since_request','credit_risk_score']})
+    (train, valid, sealed_test), _boundaries = split_months(data)
+    result = (train[BAF_FEATURES], train.fraud_bool.to_numpy(), valid[BAF_FEATURES], valid.fraud_bool.to_numpy(), BAF_CATS, BAF_NUMS,
+              {'method':'earlier months train, penultimate month validation; final month sealed', 'excluded':['fraud_bool','month','device_fraud_count','days_since_request','credit_risk_score']})
+    return (*result, sealed_test[BAF_FEATURES], sealed_test.fraud_bool.to_numpy()) if include_test else result
 
 
-def ibm(path, cap):
+def ibm(path, cap, include_test=False):
     validate_ibm(path)
     first, second, total, available = ibm_boundaries(path)
-    parts, counts = ibm_splits(path, first, second, available, cap, False)
+    parts, counts = ibm_splits(path, first, second, available, cap, include_test)
     train, valid = parts['train'], parts['validation']
     numbers = ['amount_paid','log_amount_paid','same_bank','same_currency','hour','weekday']
     cats = ['receiving_currency','payment_currency','payment_format']
-    return (*train, *valid, cats, numbers,
-            {'method':'70/15/15 timestamp; final 15% sealed and never loaded for tuning', 'rows_total':total, 'excluded':['Is Laundering','Account','Account.1','Amount Received','raw bank identifiers']})
+    result = (*train, *valid, cats, numbers,
+              {'method':'70/15/15 timestamp; final 15% sealed and never loaded for tuning', 'rows_total':total, 'excluded':['Is Laundering','Account','Account.1','Amount Received','raw bank identifiers']})
+    return (*result, *parts['test']) if include_test else result
 
 
 def to_dense(transform, frame):
@@ -135,6 +143,73 @@ def resolve_device(requested: str, cuda_available: bool) -> str:
     return requested
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def final_evaluation(args) -> dict:
+    """Evaluate an immutable validation-selected export once on sealed test windows.
+
+    This path intentionally has no training code: thresholds, preprocessing and
+    weights are read from the existing experiment output.  Results go into a
+    distinct report so the serving manifest cannot accidentally turn test
+    metrics into tuning input.
+    """
+    output = args.output_dir
+    manifest_path = output / 'unified.metrics.json'
+    weights_path = output / 'unified_weights.npz'
+    preprocessors_path = output / 'unified_preprocessors.joblib'
+    final_path = output / 'unified.final_test.json'
+    if final_path.exists():
+        raise FileExistsError(f'Final evaluation already exists at {final_path}; refusing to re-evaluate this run')
+    if not all(path.is_file() for path in (manifest_path, weights_path, preprocessors_path)):
+        raise FileNotFoundError('Final evaluation requires an existing validation-selected Unified export')
+    report = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if report.get('model_kind') != 'izqar_unified_mtl' or set(report.get('tasks', {})) != set(TASKS):
+        raise ValueError('Unsupported Unified manifest for final evaluation')
+    preprocessors = joblib.load(preprocessors_path)
+    if set(preprocessors) != set(TASKS):
+        raise ValueError('Unified preprocessors do not contain exactly four tasks')
+    network = UnifiedNetwork.from_npz(weights_path, report['input_dimensions'])
+    sources = {
+        'paysim': lambda: paysim(args.paysim, args.max_train_rows, include_test=True),
+        'ieee_cis': lambda: ieee(args.ieee_dir, args.max_train_rows, include_test=True),
+        'baf_base': lambda: baf(args.baf, args.max_train_rows, include_test=True),
+        'ibm_aml': lambda: ibm(args.ibm_aml, args.max_train_rows, include_test=True),
+    }
+    outputs = {}
+    for name in TASKS:
+        loaded = sources[name]()
+        x_test, y_test = loaded[7], loaded[8]
+        x_test, y_test = balanced_cap(x_test, y_test, args.max_final_rows)
+        if len(np.unique(y_test)) != 2:
+            raise ValueError(f'{name} final test must contain both classes')
+        scores = network.predict_scores(name, to_dense(preprocessors[name], x_test))
+        threshold = report['tasks'][name].get('threshold')
+        if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+            raise ValueError(f'{name} has no valid validation-selected threshold')
+        outputs[name] = {'threshold_from_validation': float(threshold), 'final_test_metrics': metrics(y_test, scores, float(threshold))}
+    final = {
+        'format_version': 1,
+        'evaluation_type': 'one_time_sealed_final_test',
+        'evaluated_at_utc': datetime.now(timezone.utc).isoformat(),
+        'model_version': report.get('model_version'),
+        'manifest_sha256': sha256_file(manifest_path),
+        'weights_sha256': sha256_file(weights_path),
+        'preprocessors_sha256': sha256_file(preprocessors_path),
+        'max_final_rows': args.max_final_rows,
+        'tasks': outputs,
+        'warning': ('One-time final evaluation only. These results must not be used to select thresholds, epochs, '
+                    'features, model architecture, or a replacement for specialised models.'),
+    }
+    final_path.write_text(json.dumps(final, ensure_ascii=False, indent=2), encoding='utf-8')
+    return final
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--paysim', type=Path, required=True)
@@ -142,14 +217,22 @@ def main():
     parser.add_argument('--baf', type=Path, required=True)
     parser.add_argument('--ibm-aml', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--mode', choices=['experiment', 'final'], default='experiment',
+                        help='experiment trains using train/validation only; final evaluates an existing frozen export once')
     parser.add_argument('--max-train-rows', type=int, default=150_000)
     parser.add_argument('--max-validation-rows', type=int, default=75_000)
+    parser.add_argument('--max-final-rows', type=int, default=None,
+                        help='optional deterministic cap for a one-time final test; omit for the entire sealed window')
     parser.add_argument('--epochs', type=int, default=12)
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--device', default='auto', choices=['auto','cpu','cuda'])
     args = parser.parse_args()
-    if min(args.max_train_rows, args.max_validation_rows, args.epochs, args.batch_size) < 1:
+    if min(args.max_train_rows, args.max_validation_rows, args.epochs, args.batch_size) < 1 or (args.max_final_rows is not None and args.max_final_rows < 1):
         parser.error('all limits must be positive')
+    if args.mode == 'final':
+        result = final_evaluation(args)
+        print(json.dumps({'final_evaluation': str(args.output_dir / 'unified.final_test.json'), 'tasks': result['tasks']}, ensure_ascii=False, indent=2))
+        return
     try:
         import torch
         from torch import nn

@@ -21,6 +21,16 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 4. Проверьте `GET /api/v1/model/status`: поле `unified_mtl.task_schemas.<task>` должно совпасть с `task_metadata.<task>.feature_schema.all` из манифеста. Затем выполните отдельный `POST /api/v1/unified/<task>/predict` с этой точной схемой. Панель ML Analytics умеет сформировать такой шаблон после установки артефакта.
 
+## Однократная final-оценка Unified
+
+Не запускайте этот этап для выбора модели или настроек. После зафиксированного решения по validation используйте существующий Kaggle output-каталог с доверенными `unified.metrics.json`, `unified_weights.npz` и `unified_preprocessors.joblib`:
+
+```powershell
+python backend/scripts/train_unified.py --paysim <PaySim.csv> --ieee-dir <ieee-dir> --baf <Base.csv> --ibm-aml <HI-Small_Trans.csv> --output-dir <existing-unified-output> --mode final
+```
+
+Команда не выполняет обучение: она применяет неизменённые веса, preprocessing и пороги, выбранные на validation, к закрытым test-окнам и создаёт `unified.final_test.json`. Повторный запуск в том же output-каталоге намеренно завершается ошибкой; не обходите эту защиту.
+
 ## Локальные проверки и запуск
 
 ```powershell

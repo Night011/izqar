@@ -1,12 +1,18 @@
 """Pure protocol tests for the Kaggle-only joint trainer."""
+import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
+import joblib
 import numpy as np
 import pandas as pd
+import pytest
+from sklearn.preprocessing import FunctionTransformer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_unified import baf, balanced_cap, choose_threshold, ieee, metrics, resolve_device, transformer  # noqa: E402
+from app.unified_network import TASKS, required_shapes
+from train_unified import baf, balanced_cap, choose_threshold, final_evaluation, ieee, metrics, resolve_device, transformer  # noqa: E402
 
 
 def test_training_adapter_is_train_fitted_and_handles_unknown_categories():
@@ -88,3 +94,28 @@ def test_auto_device_resolves_to_cpu_without_cuda():
         assert 'unavailable' in str(exc)
     else:
         raise AssertionError('explicit CUDA must fail when unavailable')
+
+
+def test_final_evaluation_reads_frozen_export_once_without_training(tmp_path, monkeypatch):
+    dimensions = {task: 1 for task in TASKS}
+    manifest = {'model_kind': 'izqar_unified_mtl', 'model_version': 'test-run', 'input_dimensions': dimensions,
+                'tasks': {task: {'threshold': .5} for task in TASKS}}
+    (tmp_path / 'unified.metrics.json').write_text(json.dumps(manifest), encoding='utf-8')
+    joblib.dump({task: FunctionTransformer(validate=False) for task in TASKS}, tmp_path / 'unified_preprocessors.joblib')
+    np.savez_compressed(tmp_path / 'unified_weights.npz', **{
+        key: np.zeros(shape, dtype=np.float32) for key, shape in required_shapes(dimensions).items()
+    })
+    frame = pd.DataFrame({'amount': [1., 2., 3., 4.]})
+    target = np.array([0, 0, 1, 1], dtype=np.int8)
+    loaded = (frame, target, frame, target, [], ['amount'], {'method': 'test'}, frame, target)
+    for name in ('paysim', 'ieee', 'baf', 'ibm'):
+        monkeypatch.setattr(f'train_unified.{name}', lambda *args, **kwargs: loaded)
+    args = SimpleNamespace(output_dir=tmp_path, paysim=tmp_path / 'paysim.csv', ieee_dir=tmp_path,
+                           baf=tmp_path / 'baf.csv', ibm_aml=tmp_path / 'ibm.csv', max_train_rows=4,
+                           max_final_rows=None)
+    result = final_evaluation(args)
+    assert set(result['tasks']) == set(TASKS)
+    assert (tmp_path / 'unified.final_test.json').is_file()
+    assert result['tasks']['paysim']['threshold_from_validation'] == .5
+    with pytest.raises(FileExistsError, match='refusing'):
+        final_evaluation(args)
