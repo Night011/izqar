@@ -74,9 +74,17 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     weighted_pay_report = train_paysim(paysim_path, weighted_pay, n_estimators=8, max_rows=None,
                                        mode='experiment', positive_weight_multiplier=1.5)
     assert weighted_pay_report['experiment']['hyperparameters']['positive_weight_multiplier'] == 1.5
+    early_stop_pay = tmp_path / 'experiments' / 'paysim_early_stop.joblib'
+    early_stop_report = train_paysim(paysim_path, early_stop_pay, n_estimators=8, max_rows=None,
+                                     mode='experiment', early_stopping_rounds=2)
+    assert early_stop_report['xgboost_training']['early_stopping_rounds'] == 2
+    assert early_stop_report['xgboost_training']['selection_data'].startswith('validation only')
     with pytest.raises(ValueError, match='validation-only'):
         train_paysim(paysim_path, tmp_path / 'paysim_weighted_final.joblib', 8, None,
                      positive_weight_multiplier=1.5)
+    with pytest.raises(ValueError, match='validation-only'):
+        train_paysim(paysim_path, tmp_path / 'paysim_early_stop_final.joblib', 8, None,
+                     early_stopping_rounds=2)
     engineered_pay = tmp_path / 'experiments' / 'paysim_engineered.joblib'
     engineered_report = train_paysim(paysim_path, engineered_pay, n_estimators=8, max_rows=None,
                                      mode='experiment', feature_set='pre_transaction_v2')

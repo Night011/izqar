@@ -48,6 +48,8 @@ cd backend
 .\.venv\Scripts\python.exe scripts\train_ibm_aml.py --data <HI-Small_Trans.csv> --mode experiment --feature-set causal_history_v1 --history-max-accounts 500000 --max-train-rows 500000 --output models\experiments\ibm_history_candidate_01.joblib --max-false-alerts-per-10000 100
 ```
 
+PaySim допускает отдельный заранее зарегистрированный early-stopping candidate только в `experiment`-режиме, например `--estimators 600 --early-stopping-rounds 30`. Его preprocessing fit остаётся только на train, а ранняя остановка видит только chronological validation; код намеренно отклоняет этот параметр в `final`.
+
 Не запускайте `--mode final` для настройки этих старых holdout. Для Unified остаётся отдельная sealed one-time final процедура из [NEXT_STEPS.md](NEXT_STEPS.md).
 
 PaySim-отчёт теперь содержит `validation_type_slices` для `TRANSFER` и `CASH_OUT`, а также `validation_robustness`. Последний выполняет детерминированную пропуск-стресс-проверку балансов и schema-проверку неизвестной категории `type` только на validation. Это диагностические результаты, а не реалистичный сценарий мошенничества и не причина менять threshold.

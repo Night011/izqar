@@ -73,7 +73,8 @@ def decision_time_features(rows: pd.DataFrame, feature_set: str) -> pd.DataFrame
 
 
 def validate_run_configuration(mode: str, positive_weight_multiplier: float, feature_set: str,
-                               frozen_final_feature_set: str | None) -> None:
+                               frozen_final_feature_set: str | None,
+                               early_stopping_rounds: int | None = None) -> None:
     """Protect the held-out test from accidental candidate iteration."""
     if mode == 'final' and positive_weight_multiplier != 1.0:
         raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
@@ -83,6 +84,10 @@ def validate_run_configuration(mode: str, positive_weight_multiplier: float, fea
         raise ValueError('frozen final feature set must exactly match --feature-set')
     if mode == 'final' and feature_set != 'pre_transaction_v1' and frozen_final_feature_set != feature_set:
         raise ValueError('engineered feature candidates require an explicit matching frozen final feature set')
+    if early_stopping_rounds is not None and early_stopping_rounds < 1:
+        raise ValueError('early_stopping_rounds must be positive when supplied')
+    if mode == 'final' and early_stopping_rounds is not None:
+        raise ValueError('early stopping candidates are validation-only; final mode must use a frozen configuration')
 
 
 def file_provenance(path: Path) -> dict:
@@ -190,7 +195,8 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
 
 def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None,
           model_version: str = 'paysim-xgboost-v1', mode: str = 'final', positive_weight_multiplier: float = 1.0,
-          feature_set: str = 'pre_transaction_v1', frozen_final_feature_set: str | None = None):
+          feature_set: str = 'pre_transaction_v1', frozen_final_feature_set: str | None = None,
+          early_stopping_rounds: int | None = None):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
     if not model_version.startswith('paysim-xgboost-v') or not model_version.removeprefix('paysim-xgboost-v').isdigit():
@@ -200,7 +206,8 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     if not np.isfinite(positive_weight_multiplier) or positive_weight_multiplier <= 0:
         raise ValueError('positive_weight_multiplier must be a finite positive number')
     features, numeric, categorical = feature_schema(feature_set)
-    validate_run_configuration(mode, positive_weight_multiplier, feature_set, frozen_final_feature_set)
+    validate_run_configuration(mode, positive_weight_multiplier, feature_set, frozen_final_feature_set,
+                               early_stopping_rounds)
     if not data_path.is_file():
         raise FileNotFoundError(f'Missing {data_path}. Download PaySim manually from Kaggle and keep it outside Git.')
     data = read_paysim(data_path, max_rows)
@@ -217,7 +224,8 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         hyperparameters={'n_estimators': n_estimators, 'max_rows': max_rows, 'max_depth': 4,
                          'learning_rate': .065, 'feature_set': feature_set,
                          'positive_weight_multiplier': positive_weight_multiplier,
-                         'frozen_final_feature_set': frozen_final_feature_set},
+                         'frozen_final_feature_set': frozen_final_feature_set,
+                         'early_stopping_rounds': early_stopping_rounds},
     )
     transform = ColumnTransformer([
         ('numeric', SimpleImputer(strategy='median', add_indicator=True), numeric),
@@ -235,18 +243,27 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
                          ('model', LogisticRegression(max_iter=1000, tol=1e-3, class_weight='balanced', solver='liblinear'))])
     model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.065, subsample=.85, colsample_bytree=.85,
                           reg_lambda=3, objective='binary:logistic', tree_method='hist', eval_metric='aucpr', random_state=42,
-                          n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=(negatives / positives) * positive_weight_multiplier)
+                          n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=(negatives / positives) * positive_weight_multiplier,
+                          early_stopping_rounds=early_stopping_rounds)
     pipeline = Pipeline([('preprocessing', transform), ('model', model)])
     with warnings.catch_warnings():
         warnings.filterwarnings('error', category=ConvergenceWarning)
         baseline.fit(decision_time_features(train_rows, feature_set), y_train)
     if baseline.named_steps['model'].n_iter_[0] >= 1000:
         raise RuntimeError('PaySim baseline logistic regression did not converge')
-    pipeline.fit(decision_time_features(train_rows, feature_set), y_train)
+    # Fit transformations exclusively on the earlier train period. Validation
+    # may stop an experiment, but never enters preprocessing fitting; the final
+    # test is not transformed or supplied to XGBoost in experiment mode.
+    x_train = decision_time_features(train_rows, feature_set)
+    x_valid = decision_time_features(valid_rows, feature_set)
+    x_train_transformed = transform.fit_transform(x_train)
+    x_valid_transformed = transform.transform(x_valid)
+    model.fit(x_train_transformed, y_train,
+              eval_set=[(x_valid_transformed, valid_rows['isFraud'].astype(int))], verbose=False)
     encoded_features = pipeline.named_steps['preprocessing'].get_feature_names_out()
     importances = pipeline.named_steps['model'].feature_importances_
     ranked = sorted(zip(encoded_features, importances), key=lambda item: item[1], reverse=True)
-    valid_scores = pipeline.predict_proba(decision_time_features(valid_rows, feature_set))[:, 1]
+    valid_scores = model.predict_proba(x_valid_transformed)[:, 1]
     threshold = choose_threshold(valid_rows['isFraud'].astype(int), valid_scores)
     test_metrics = None
     baseline_test_metrics = None
@@ -275,6 +292,9 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'test_metrics': test_metrics,
         'baseline_test_metrics': baseline_test_metrics,
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True},
+        'xgboost_training': {'early_stopping_rounds': early_stopping_rounds,
+                             'best_iteration': getattr(model, 'best_iteration', None),
+                             'selection_data': 'validation only; final test is never passed to fit'},
         'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)} for name, value in ranked[:30]],
                                'leakage_audit': ('Encoded features derive only from type, amount, oldbalanceOrg and oldbalanceDest; '
                                                  'engineered ratios and flags exclude arithmetic post-balance proxies; '
@@ -313,12 +333,14 @@ def main():
                         help='v2 adds only row-local transformations of API-available pre-transaction fields')
     parser.add_argument('--frozen-final-feature-set', choices=['pre_transaction_v2'],
                         help='Required exact acknowledgement before a sealed v2 final run')
+    parser.add_argument('--early-stopping-rounds', type=int,
+                        help='Experiment-only XGBoost early stopping rounds using the chronological validation period')
     args = parser.parse_args()
     if args.max_rows is not None and args.max_rows < 100:
         parser.error('--max-rows must be at least 100')
     train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows,
           args.model_version, args.mode, args.positive_weight_multiplier, args.feature_set,
-          args.frozen_final_feature_set)
+          args.frozen_final_feature_set, args.early_stopping_rounds)
 
 
 if __name__ == '__main__':
