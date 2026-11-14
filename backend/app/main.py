@@ -284,6 +284,7 @@ def model_status():
                 'model_version': artifact.get('model_version', 'unknown'),
                 'dataset': artifact.get('dataset', 'unknown'),
                 'trained_at_utc': artifact.get('trained_at_utc'),
+                'preprocessing_compatibility': artifact.get('preprocessing_compatibility'),
                 'split_counts': artifact.get('split_counts', {}),
                 'score_kind': 'uncalibrated_ml_score',
                 'validation_ranking_metrics': artifact.get('validation_ranking_metrics'),

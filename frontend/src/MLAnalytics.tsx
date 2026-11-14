@@ -35,6 +35,7 @@ function ModelCard({ title, detail, error }: { title: string; detail?: ModelDeta
   return <section className="panel ml-card">
     <div className="ml-card-head"><div><h2>{title}</h2><p>{detail.dataset}</p></div><span className="count-tag">{detail.model_version}</span></div>
     <p>Обучена: {detail.trained_at_utc || 'не указано'} · Признаков: {detail.features}</p>
+    {detail.preprocessing_compatibility && <p>Preprocessing загружен через проверенный adapter совместимости {detail.preprocessing_compatibility}; параметры модели не переобучались.</p>}
     {m ? <><div className="ml-metrics">
       <div><span>Precision</span><strong>{pct(m.precision)}</strong></div><div><span>Recall</span><strong>{pct(m.recall)}</strong></div>
       <div><span>F1</span><strong>{pct(m.f1)}</strong></div><div><span>PR-AUC</span><strong>{pct(m.average_precision_pr_auc)}</strong></div>

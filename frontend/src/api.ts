@@ -59,6 +59,7 @@ export interface TestMetrics {
 export interface ModelDetail {
   features: number; feature_names: string[]; test_metrics: TestMetrics | null; threshold: number;
   model_version: string; dataset: string; trained_at_utc?: string;
+  preprocessing_compatibility?: string | null;
   split_counts: Record<string, number>; score_kind: string;
   validation_ranking_metrics?: Record<string, { alerts: number; precision_at_k: number; recall_at_k: number; true_positives_at_k: number }> | null;
   validation_operating_profiles?: Record<string, { available?: boolean; threshold?: number; constraint: string; constraint_met?: boolean; reason?: string; metrics?: TestMetrics }> | null;
