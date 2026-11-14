@@ -76,11 +76,16 @@ def split_months(data: pd.DataFrame):
 
 
 def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows: int | None = None,
-          mode: str = 'experiment', max_false_alerts_per_10000: float | None = 100):
+          mode: str = 'experiment', max_false_alerts_per_10000: float | None = 100,
+          positive_weight_multiplier: float = 1.0):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError('Output already exists; preserve earlier experiment artifacts')
     if n_estimators < 1 or mode not in {'experiment', 'final'}:
         raise ValueError('Use positive estimators and experiment or final mode')
+    if not np.isfinite(positive_weight_multiplier) or positive_weight_multiplier <= 0:
+        raise ValueError('positive_weight_multiplier must be a finite positive number')
+    if mode == 'final' and positive_weight_multiplier != 1.0:
+        raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
     if max_train_rows is not None and max_train_rows < 100:
         raise ValueError('max_train_rows must be at least 100')
     data = read_base(data_path)
@@ -95,7 +100,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         split_method='month train/validation/final-test; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
-                         'max_depth': 4, 'learning_rate': .06, 'feature_set': 'base_v1'},
+                         'max_depth': 4, 'learning_rate': .06, 'feature_set': 'base_v1',
+                         'positive_weight_multiplier': positive_weight_multiplier},
     )
     numeric = Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True))])
     categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
@@ -106,7 +112,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.06,
                           subsample=.85, colsample_bytree=.85, reg_lambda=4,
                           objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
-                          scale_pos_weight=(len(y_train) - pos) / pos,
+                          scale_pos_weight=((len(y_train) - pos) / pos) * positive_weight_multiplier,
                           random_state=42, n_jobs=min(4, os.cpu_count() or 1))
     pipeline = Pipeline([('preprocessing', preprocessing), ('model', model)])
     pipeline.fit(train_rows[FEATURES], y_train)
@@ -180,9 +186,11 @@ def main():
     parser.add_argument('--estimators', type=int, default=180)
     parser.add_argument('--max-train-rows', type=int)
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100)
+    parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
+                        help='Experiment-only multiplier over inverse-prevalence class weight')
     args = parser.parse_args()
     train(args.data, args.output, args.estimators, args.max_train_rows, args.mode,
-          args.max_false_alerts_per_10000)
+          args.max_false_alerts_per_10000, args.positive_weight_multiplier)
 
 
 if __name__ == '__main__':

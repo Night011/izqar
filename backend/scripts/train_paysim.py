@@ -84,13 +84,17 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
 
 
 def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None,
-          model_version: str = 'paysim-xgboost-v1', mode: str = 'final'):
+          model_version: str = 'paysim-xgboost-v1', mode: str = 'final', positive_weight_multiplier: float = 1.0):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
     if not model_version.startswith('paysim-xgboost-v') or not model_version.removeprefix('paysim-xgboost-v').isdigit():
         raise ValueError('model_version must have the form paysim-xgboost-vN')
     if mode not in {'experiment', 'final'}:
         raise ValueError('mode must be experiment or final')
+    if not np.isfinite(positive_weight_multiplier) or positive_weight_multiplier <= 0:
+        raise ValueError('positive_weight_multiplier must be a finite positive number')
+    if mode == 'final' and positive_weight_multiplier != 1.0:
+        raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
     if not data_path.is_file():
         raise FileNotFoundError(f'Missing {data_path}. Download PaySim manually from Kaggle and keep it outside Git.')
     data = read_paysim(data_path, max_rows)
@@ -105,7 +109,8 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         dataset='PaySim', algorithm='XGBoost', features=FEATURES,
         split_method='chronological step 70/15/15; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_rows': max_rows, 'max_depth': 4,
-                         'learning_rate': .065, 'feature_set': 'pre_transaction_v1'},
+                         'learning_rate': .065, 'feature_set': 'pre_transaction_v1',
+                         'positive_weight_multiplier': positive_weight_multiplier},
     )
     transform = ColumnTransformer([
         ('numeric', SimpleImputer(strategy='median', add_indicator=True), NUMERIC),
@@ -123,7 +128,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
                          ('model', LogisticRegression(max_iter=1000, tol=1e-3, class_weight='balanced', solver='liblinear'))])
     model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.065, subsample=.85, colsample_bytree=.85,
                           reg_lambda=3, objective='binary:logistic', tree_method='hist', eval_metric='aucpr', random_state=42,
-                          n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=negatives / positives)
+                          n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=(negatives / positives) * positive_weight_multiplier)
     pipeline = Pipeline([('preprocessing', transform), ('model', model)])
     with warnings.catch_warnings():
         warnings.filterwarnings('error', category=ConvergenceWarning)
@@ -173,6 +178,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
                       'validation': artifact['validation_metrics'], 'test': artifact['test_metrics']}, ensure_ascii=False, indent=2))
     if mode == 'final':
         print('IMPORTANT: isFraud was used only as y; the held-out test set was evaluated once after validation threshold selection.')
+    return report
 
 
 def main():
@@ -185,11 +191,13 @@ def main():
     parser.add_argument('--mode', choices=['experiment', 'final'], default='experiment',
                         help='Experiment mode omits the held-out test and writes metrics only')
     parser.add_argument('--model-version', default='paysim-xgboost-v1', help='Version identifier saved with the artifact')
+    parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
+                        help='Experiment-only multiplier over inverse-prevalence class weight')
     args = parser.parse_args()
     if args.max_rows is not None and args.max_rows < 100:
         parser.error('--max-rows must be at least 100')
     train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows,
-          args.model_version, args.mode)
+          args.model_version, args.mode, args.positive_weight_multiplier)
 
 
 if __name__ == '__main__':

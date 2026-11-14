@@ -216,7 +216,7 @@ def choose_threshold(y_true, scores):
 
 def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None = None,
           mode: str = 'final', max_false_alerts_per_10000: float | None = None,
-          feature_set: str = 'core'):
+          feature_set: str = 'core', positive_weight_multiplier: float = 1.0):
     if mode not in {'experiment', 'final'} or n_estimators < 1:
         raise ValueError('mode must be experiment or final; estimators must be positive')
     if feature_set not in {'core', 'extended_cv'}:
@@ -278,6 +278,10 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
     (train_pool, valid_rows, test_rows), split_boundaries = split_chronologically(data)
     if max_rows is not None and max_rows < 100:
         raise ValueError('max_rows must be at least 100')
+    if not np.isfinite(positive_weight_multiplier) or positive_weight_multiplier <= 0:
+        raise ValueError('positive_weight_multiplier must be a finite positive number')
+    if mode == 'final' and positive_weight_multiplier != 1.0:
+        raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
     train_rows = train_pool.tail(max_rows) if max_rows is not None else train_pool
     if train_rows['isFraud'].nunique() != 2:
         raise ValueError('Selected train rows must contain both classes')
@@ -289,7 +293,8 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         split_method='chronological TransactionDT 70/15/15; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
-                         'max_depth': 4, 'learning_rate': .065, 'feature_set': feature_set},
+                         'max_depth': 4, 'learning_rate': .065, 'feature_set': feature_set,
+                         'positive_weight_multiplier': positive_weight_multiplier},
     )
 
     transform = ColumnTransformer([
@@ -303,7 +308,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         n_estimators=n_estimators, max_depth=4, learning_rate=.065, subsample=.85,
         colsample_bytree=.85, reg_lambda=3, objective='binary:logistic',
         tree_method='hist', eval_metric='aucpr', random_state=42,
-        n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=float(negatives / positives),
+        n_jobs=min(4, os.cpu_count() or 1), scale_pos_weight=float(negatives / positives) * positive_weight_multiplier,
     )
     pipeline = Pipeline([('preprocessing', transform), ('model', classifier)])
     x_train, y_train = train_rows[features], train_rows['isFraud'].astype(int)
@@ -377,6 +382,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
                       'validation': validation_metrics, 'test': test_metrics, 'baseline_test': baseline_test_metrics}, ensure_ascii=False, indent=2))
     if mode == 'final':
         print('IMPORTANT: The fixed held-out test set was evaluated once after all choices on validation.')
+    return report
 
 
 def main():
@@ -389,6 +395,8 @@ def main():
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=None, help='Validation constraint; otherwise maximize F1')
     parser.add_argument('--feature-set', choices=['core', 'extended_cv'], default='core',
                         help='Candidate extended C/V features; evaluate in experiment mode before any final use')
+    parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
+                        help='Experiment-only multiplier over inverse-prevalence class weight')
     args = parser.parse_args()
     if args.max_train_rows is not None and args.max_train_rows < 100:
         parser.error('--max-train-rows must be at least 100')
@@ -397,7 +405,7 @@ def main():
     if args.mode == 'final' and args.max_train_rows is not None:
         parser.error('Final run uses all rows in the fixed train window')
     train(args.data_dir, args.output, args.estimators, args.max_train_rows, args.mode,
-          args.max_false_alerts_per_10000, args.feature_set)
+          args.max_false_alerts_per_10000, args.feature_set, args.positive_weight_multiplier)
 
 if __name__ == '__main__':
     main()

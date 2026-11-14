@@ -47,6 +47,13 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert not pay_experiment.exists()
     assert pay_experiment_report['test_metrics'] is None
     assert pay_experiment_report['baseline_test_metrics'] is None
+    weighted_pay = tmp_path / 'experiments' / 'paysim_weighted.joblib'
+    weighted_pay_report = train_paysim(paysim_path, weighted_pay, n_estimators=8, max_rows=None,
+                                       mode='experiment', positive_weight_multiplier=1.5)
+    assert weighted_pay_report['experiment']['hyperparameters']['positive_weight_multiplier'] == 1.5
+    with pytest.raises(ValueError, match='validation-only'):
+        train_paysim(paysim_path, tmp_path / 'paysim_weighted_final.joblib', 8, None,
+                     positive_weight_multiplier=1.5)
     with pytest.raises(FileExistsError, match='Output already exists'):
         train_paysim(paysim_path, pay_model, 8, None)
     pay_audit = audit_paysim_validation(paysim_path, pay_model, pay_model.with_name(pay_model.stem + '.validation_audit.json'))
@@ -85,6 +92,10 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     assert experiment_report['split_boundaries'] == ieee_report['split_boundaries']
     assert experiment_report['split_counts']['final_test'] == ieee_report['split_counts']['final_test']
     assert experiment_report['split_counts']['train_used'] == 100
+    weighted_ieee = tmp_path / 'experiments' / 'ieee_weighted.joblib'
+    weighted_ieee_report = train_ieee(ieee_dir, weighted_ieee, n_estimators=8, max_rows=100,
+                                      mode='experiment', positive_weight_multiplier=.75)
+    assert weighted_ieee_report['experiment']['hyperparameters']['positive_weight_multiplier'] == .75
     extended_path = tmp_path / 'ieee_extended.joblib'
     train_ieee(ieee_dir, extended_path, 8, 100, 'experiment', feature_set='extended_cv')
     extended_report = json.loads(extended_path.with_suffix('.metrics.json').read_text(encoding='utf-8'))
