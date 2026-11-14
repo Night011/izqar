@@ -70,6 +70,11 @@ def experiment_provenance(task_weights: dict[str, float]) -> dict:
     return {'mode': 'experiment', 'task_weights': task_weights.copy()}
 
 
+def early_stop_reached(best_epoch: int, current_epoch: int, patience: int | None) -> bool:
+    """Return whether a validation-only training run exhausted its patience."""
+    return patience is not None and current_epoch - best_epoch >= patience
+
+
 def metrics(y, scores, threshold):
     predicted = (scores >= threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(y, predicted, labels=[0, 1]).ravel()
@@ -261,6 +266,8 @@ def main():
     parser.add_argument('--max-final-rows', type=int, default=None,
                         help='optional deterministic cap for a one-time final test; omit for the entire sealed window')
     parser.add_argument('--epochs', type=int, default=12)
+    parser.add_argument('--early-stopping-patience', type=int, default=None,
+                        help='Experiment-only patience in epochs for summed validation PR-AUC across four tasks')
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--device', default='auto', choices=['auto','cpu','cuda'])
     parser.add_argument('--task-weights', default=None,
@@ -268,9 +275,13 @@ def main():
     args = parser.parse_args()
     if min(args.max_train_rows, args.max_validation_rows, args.epochs, args.batch_size) < 1 or (args.max_final_rows is not None and args.max_final_rows < 1):
         parser.error('all limits must be positive')
+    if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
+        parser.error('--early-stopping-patience must be positive')
     if args.mode == 'final':
         if args.task_weights is not None:
             parser.error('--task-weights is a training experiment option and cannot be used with final evaluation')
+        if args.early_stopping_patience is not None:
+            parser.error('--early-stopping-patience is an experiment option and cannot be used with final evaluation')
         result = final_evaluation(args)
         print(json.dumps({'final_evaluation': str(args.output_dir / 'unified.final_test.json'), 'tasks': result['tasks']}, ensure_ascii=False, indent=2))
         return
@@ -308,7 +319,8 @@ def main():
         loss = task_weights[name] * F.binary_cross_entropy_with_logits(model(name, torch.tensor(x[:take], device=device)), torch.tensor(y[:take], device=device), pos_weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device)); loss.backward()
         gradient_audit[name] = round(float(model.shared[0].weight.grad.norm().detach().cpu()), 8)
     if any(value <= 0 for value in gradient_audit.values()): raise RuntimeError(f'No shared-backbone gradient: {gradient_audit}')
-    best, best_state, history = float('-inf'), None, []
+    best, best_state, best_epoch, history = float('-inf'), None, 0, []
+    stop_reason = 'max_epochs_reached'
     for epoch in range(args.epochs):
         model.train(); losses = {}
         for name in TASKS:
@@ -325,10 +337,13 @@ def main():
                 _,_,x,y=prepared[name]; s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); epoch_metrics[name]=round(float(average_precision_score(y,s)),6); score += epoch_metrics[name]
         history.append({'epoch':epoch+1,'loss':losses,'validation_pr_auc':epoch_metrics})
         if score > best:
-            best, best_state = score, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
+            best, best_epoch, best_state = score, epoch + 1, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
             args.output_dir.mkdir(parents=True, exist_ok=True)
             torch.save({'epoch': epoch + 1, 'state_dict': best_state, 'optimizer_state': optimiser.state_dict(),
                         'validation_pr_auc_sum': best, 'seed': RNG}, args.output_dir/'unified_checkpoint.pt')
+        elif early_stop_reached(best_epoch, epoch + 1, args.early_stopping_patience):
+            stop_reason = 'validation_pr_auc_patience_exhausted'
+            break
     model.load_state_dict(best_state); args.output_dir.mkdir(parents=True,exist_ok=True)
     np.savez_compressed(args.output_dir/'unified_weights.npz', **{k:v.numpy().astype('float32') for k,v in best_state.items()})
     joblib.dump(preprocessors, args.output_dir/'unified_preprocessors.joblib')
@@ -344,6 +359,8 @@ def main():
             'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,
                         'loss':'per-task positive-weighted BCE with explicit task weights and equal task update rounds',
                         'task_weights':task_weights,'seed':RNG,'best_validation_pr_auc_sum':best,
+                        'best_epoch':best_epoch, 'epochs_ran':len(history),
+                        'early_stopping_patience':args.early_stopping_patience, 'stop_reason':stop_reason,
                         'seconds':round(time.monotonic()-started,3),'history':history},
             'task_metadata':metadata,
             'warning':'Experimental multi-task model. Validation only; no final tests were used. Scores are uncalibrated and individual specialized models remain the primary detectors unless comparison supports replacement.'}
