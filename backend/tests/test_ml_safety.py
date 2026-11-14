@@ -52,7 +52,8 @@ def test_paysim_v2_features_are_row_local_and_pre_transaction_only():
     all_features, numeric, categorical = feature_schema('pre_transaction_v2')
     result = decision_time_features(rows, 'pre_transaction_v2')
     assert list(result) == all_features
-    assert not {'isFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'}.intersection(result)
+    assert not {'isFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step',
+                'origin_balance_after_requested_amount'}.intersection(result)
     assert result.loc[0, 'amount_to_origin_balance'] == 0.5
     assert result.loc[1, 'amount_to_origin_balance'] == 8.0
     assert result.loc[0, 'destination_balance_is_zero'] == 1.0

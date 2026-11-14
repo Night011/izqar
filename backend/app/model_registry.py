@@ -13,7 +13,7 @@ FORBIDDEN = {'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest',
              'TransactionID', 'TransactionDT', 'fraud_bool', 'Is Laundering',
              'Account', 'Account.1', 'nameOrig', 'nameDest', 'step', 'month',
              'device_fraud_count', 'days_since_request', 'credit_risk_score',
-             'Amount Received'}
+             'Amount Received', 'origin_balance_after_requested_amount'}
 
 
 def _sha256(path: Path) -> str:

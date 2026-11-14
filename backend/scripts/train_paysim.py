@@ -37,7 +37,7 @@ NUMERIC = ['amount', 'oldbalanceOrg', 'oldbalanceDest']
 CATEGORICAL = ['type']
 REQUIRED = {'step', 'type', 'amount', 'oldbalanceOrg', 'oldbalanceDest', 'isFraud'}
 ENGINEERED_NUMERIC = ['amount_to_origin_balance', 'amount_to_destination_balance',
-                      'origin_balance_after_requested_amount', 'destination_balance_is_zero']
+                      'destination_balance_is_zero']
 
 
 def feature_schema(feature_set: str) -> tuple[list[str], list[str], list[str]]:
@@ -52,9 +52,10 @@ def feature_schema(feature_set: str) -> tuple[list[str], list[str], list[str]]:
 def decision_time_features(rows: pd.DataFrame, feature_set: str) -> pd.DataFrame:
     """Derive candidate features only from the four API-available input fields.
 
-    No label, post-event balance, participant ID, time step, or cross-row
-    history is read here.  Ratios use one as a lower denominator bound so a
-    zero opening balance is represented without infinity.
+    No label, post-event balance (including an arithmetic proxy for it),
+    participant ID, time step, or cross-row history is read here. Ratios use
+    one as a lower denominator bound so a zero opening balance is represented
+    without infinity.
     """
     features, _, _ = feature_schema(feature_set)
     missing = set(FEATURES) - set(rows.columns)
@@ -67,7 +68,6 @@ def decision_time_features(rows: pd.DataFrame, feature_set: str) -> pd.DataFrame
         destination = pd.to_numeric(result['oldbalanceDest'], errors='coerce')
         result['amount_to_origin_balance'] = amount / origin.clip(lower=1.0)
         result['amount_to_destination_balance'] = amount / destination.clip(lower=1.0)
-        result['origin_balance_after_requested_amount'] = origin - amount
         result['destination_balance_is_zero'] = np.where(destination.isna(), np.nan, (destination == 0).astype('float32'))
     return result.loc[:, features]
 
@@ -263,7 +263,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True},
         'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)} for name, value in ranked[:30]],
                                'leakage_audit': ('Encoded features derive only from type, amount, oldbalanceOrg and oldbalanceDest; '
-                                                 'engineered ratios and deltas are row-local pre-transaction transformations only; '
+                                                 'engineered ratios and flags exclude arithmetic post-balance proxies; '
                                                  'importance does not establish causality.')},
         'split_method': '70/15/15 chronological step ascending',
         'excluded_for_leakage': ['isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'],

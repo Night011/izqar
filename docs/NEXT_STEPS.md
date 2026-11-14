@@ -100,7 +100,9 @@ ZIP SHA-256: BAF `c8b4384a671517a1e94889e173907f3f586eadd4156e09b1158de8f0b664b4
 
 ### PaySim pre_transaction_v2 candidate
 
-Следующий controlled experiment меняет только feature set на `pre_transaction_v2`: `amount_to_origin_balance`, `amount_to_destination_balance`, `origin_balance_after_requested_amount` и `destination_balance_is_zero`. Все признаки row-local и вычисляются только из уже доступных до решения `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; target, post-event balances, account IDs, step и history исключены. Эта ветка блокирует `--mode final` и не меняет active API schema.
+Первый run этой идеи был отозван: арифметический `origin_balance_after_requested_amount = oldbalanceOrg - amount` семантически воспроизводил запрещённый post-operation `newbalanceOrig`. Registry защищён от такого имени и показывает этот report как `invalid`; его хорошие validation-цифры не используются для выбора.
+
+Исправленный controlled experiment меняет только feature set на `pre_transaction_v2`: `amount_to_origin_balance`, `amount_to_destination_balance` и `destination_balance_is_zero`. Все признаки row-local и вычисляются только из уже доступных до решения `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; target, post-event balances, account IDs, step, history и arithmetic post-balance proxies исключены. Эта ветка блокирует `--mode final` и не меняет active API schema.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\train_paysim.py `

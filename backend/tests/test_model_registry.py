@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from app.model_registry import list_registry
+from app.model_registry import FORBIDDEN, list_registry
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from import_experiment_report import import_report  # noqa: E402
@@ -47,6 +47,10 @@ def test_registry_rejects_leaky_schema_and_protects_api(client, auth, tmp_path):
     response = client.get('/api/v1/model/registry', headers=auth)
     assert response.status_code == 200
     assert response.json()['registry_version'] == 2
+
+
+def test_registry_forbids_paysim_post_balance_arithmetic_proxy():
+    assert 'origin_balance_after_requested_amount' in FORBIDDEN
 
 
 def test_registry_accepts_unified_manifest_only_with_four_clean_task_schemas(tmp_path):
