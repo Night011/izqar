@@ -38,7 +38,7 @@ Rule Engine, ML-скор и графовый индикатор **не объе�
 ## Что работает сейчас
 
 - React + TypeScript консоль: Dashboard, операции, расследования, Network Explorer, ML Analytics и Model Registry.
-- FastAPI с локальным demo API-key, строгими схемами, лимитом тела запроса 64 KiB и CORS только для localhost по умолчанию.
+- FastAPI с локальным demo API-key, строгими схемами, лимитом тела запроса 64 KiB и CORS только для localhost по умолчанию. `IZQAR_CORS_ORIGINS` принимает только явные HTTP(S) origins без `*`, пути или credentials.
 - Отдельный API-инференс для PaySim, IEEE-CIS, BAF Base, IBM AML и четырёх head Unified.
 - Проверка схем, версий, происхождения и контрольных сумм артефактов; нет модели — нет фиктивного прогноза.
 - Локальные TreeSHAP-вклады XGBoost для запроса модели: до пяти признаков без возврата введённых значений. Это объяснение модели, не причинный вывод.
