@@ -100,9 +100,9 @@ export function MLAnalytics({ status, apiKey }: { status: ModelStatus | null; ap
     <ModelComparison status={status} />
     <section className="panel ml-card"><h2>Model Registry</h2><p>Активные артефакты, кандидаты и архивные отчёты. Контрольные суммы подтверждают идентичность файлов, а метрики взяты из сохранённых отчётов. Кандидат не становится рабочей моделью автоматически.</p>
       {registryError && <p className="ml-error">Ошибка реестра: {registryError}</p>}
-      {registry && <><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Test</th><th>Аудит</th></tr></thead><tbody>
+      {registry && <><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Проверенные метрики</th><th>Аудит</th></tr></thead><tbody>
         {registry.entries.filter(entry => entry.active_for).map(entry => <RegistryRow key={`${entry.active_for}-${entry.manifest}`} entry={entry} />)}
-      </tbody></table></div><details className="registry-history"><summary>История отчётов ({registry.entries.filter(entry => !entry.active_for).length})</summary><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Test</th><th>Аудит</th></tr></thead><tbody>
+      </tbody></table></div><details className="registry-history"><summary>История отчётов ({registry.entries.filter(entry => !entry.active_for).length})</summary><div className="registry-scroll"><table className="registry-table"><thead><tr><th>Модель</th><th>Версия</th><th>Состояние</th><th>Проверенные метрики</th><th>Аудит</th></tr></thead><tbody>
         {registry.entries.filter(entry => !entry.active_for).map(entry => <RegistryRow key={entry.manifest} entry={entry} />)}
       </tbody></table></div></details></>}
     </section>
