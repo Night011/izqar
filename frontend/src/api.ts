@@ -62,6 +62,12 @@ export interface ModelDetail {
   split_counts: Record<string, number>; score_kind: string;
   validation_ranking_metrics?: Record<string, { alerts: number; precision_at_k: number; recall_at_k: number; true_positives_at_k: number }> | null;
   validation_operating_profiles?: Record<string, { available?: boolean; threshold?: number; constraint: string; constraint_met?: boolean; reason?: string; metrics?: TestMetrics }> | null;
+  validation_type_slices?: Record<string, ({ available: true } & TestMetrics) | { available: false; reason: string; cases?: number; fraud_cases?: number }> | null;
+  validation_robustness?: {
+    scope: string; warning: string;
+    missing_balances_every_tenth_row: { affected_rows: number; metrics: TestMetrics; recall_delta_vs_unmodified: number };
+    unseen_type_encoding: { synthetic_category: string; cases: number; mean_score_delta_vs_unmodified: number; flagged_rate_unmodified: number; flagged_rate_with_unseen_type: number };
+  } | null;
   feature_importance: { feature: string; importance: number }[];
 }
 export interface ModelPrediction {

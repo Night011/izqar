@@ -246,6 +246,10 @@ def model_status():
                 'score_kind': 'uncalibrated_ml_score',
                 'validation_ranking_metrics': artifact.get('validation_ranking_metrics'),
                 'validation_operating_profiles': artifact.get('validation_operating_profiles'),
+                # These are present only in newer PaySim reports.  They remain
+                # validation diagnostics, never live scoring inputs or labels.
+                'validation_type_slices': artifact.get('validation_type_slices'),
+                'validation_robustness': artifact.get('validation_robustness'),
                 'feature_importance': artifact.get('feature_importance', {}).get('top_30', [])[:10]}
     try:
         artifact = load_model()
