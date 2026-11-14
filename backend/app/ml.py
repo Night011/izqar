@@ -6,6 +6,7 @@ import json
 import joblib
 import sklearn
 from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL_PATH, UNIFIED_MODEL_PATH
+from .model_registry import FORBIDDEN as FORBIDDEN_MODEL_FEATURES
 from .unified_network import TASKS as UNIFIED_TASKS, UnifiedNetwork
 
 
@@ -132,8 +133,10 @@ def load_unified_model():
         for task in UNIFIED_TASKS:
             item = task_metadata[task].get('feature_schema', {})
             all_features, numerical, categorical = item.get('all'), item.get('numerical'), item.get('categorical')
-            if (not isinstance(all_features, list) or not all_features or set(all_features) != set(numerical or []) | set(categorical or [])
-                    or len(all_features) != len(set(all_features))):
+            if (not isinstance(all_features, list) or not all_features or not isinstance(numerical, list)
+                    or not isinstance(categorical, list) or set(all_features) != set(numerical) | set(categorical)
+                    or len(all_features) != len(set(all_features)) or len(numerical) != len(set(numerical))
+                    or len(categorical) != len(set(categorical)) or set(all_features) & FORBIDDEN_MODEL_FEATURES):
                 raise ValueError(f'invalid {task} input schema')
             schema[task] = {'all': all_features, 'numerical': numerical, 'categorical': categorical}
         stem = path.name.removesuffix('.metrics.json')

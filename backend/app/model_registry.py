@@ -11,7 +11,9 @@ MAX_ENTRIES = 100
 KINDS = {'paysim', 'ieee_cis', 'baf_base', 'ibm_aml', 'izqar_unified_mtl'}
 FORBIDDEN = {'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest',
              'TransactionID', 'TransactionDT', 'fraud_bool', 'Is Laundering',
-             'Account', 'Account.1'}
+             'Account', 'Account.1', 'nameOrig', 'nameDest', 'step', 'month',
+             'device_fraud_count', 'days_since_request', 'credit_risk_score',
+             'Amount Received'}
 
 
 def _sha256(path: Path) -> str:

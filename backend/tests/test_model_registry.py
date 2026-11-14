@@ -54,6 +54,6 @@ def test_registry_accepts_unified_manifest_only_with_four_clean_task_schemas(tmp
     result = list_registry({'izqar_unified_mtl': manifest}, root)['entries'][0]
     assert result['state'] == 'installed' and result['experimental'] is True
     assert result['task_schemas']['paysim'] == ['amount']
-    tasks['paysim']['feature_schema']['all'] = ['isFraud']
+    tasks['paysim']['feature_schema']['all'] = ['nameOrig']
     manifest.write_text(json.dumps(report), encoding='utf-8')
     assert list_registry({'izqar_unified_mtl': manifest}, root)['entries'][0]['state'] == 'invalid'

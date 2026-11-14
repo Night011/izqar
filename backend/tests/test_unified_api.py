@@ -72,3 +72,19 @@ def test_unified_missing_or_valid_cpu_artifact(client, auth, tmp_path, monkeypat
         assert client.post('/api/v1/unified/paysim/predict', headers=auth,
                            json={'features': {'amount': 10}}).status_code == 200
     ml.load_unified_model.cache_clear()
+
+
+def test_unified_loader_rejects_account_identifier_schema(client, auth, tmp_path, monkeypatch):
+    import app.ml as ml
+    manifest = make_artifact(tmp_path)
+    report = json.loads(manifest.read_text(encoding='utf-8'))
+    report['task_metadata']['paysim']['feature_schema'] = {
+        'all': ['amount', 'nameOrig'], 'numerical': ['amount'], 'categorical': ['nameOrig']}
+    manifest.write_text(json.dumps(report), encoding='utf-8')
+    with monkeypatch.context() as patch:
+        patch.setattr(ml, 'UNIFIED_MODEL_PATH', manifest)
+        ml.load_unified_model.cache_clear()
+        response = client.post('/api/v1/unified/paysim/predict', headers=auth,
+                               json={'features': {'amount': 10, 'nameOrig': 'C123'}})
+        assert response.status_code == 503
+    ml.load_unified_model.cache_clear()
