@@ -82,7 +82,8 @@ export interface RegistryEntry {
   manifest_sha256?: string; feature_count?: number;
   data_files?: { filename: string; size_bytes?: number; sha256?: string }[];
   components?: { filename: string; bytes: number; sha256: string }[];
-  validation_metrics?: TestMetrics | null; test_metrics?: TestMetrics | null;
+  validation_metrics?: TestMetrics | Record<string, { threshold?: number; validation_metrics: TestMetrics }> | null;
+  test_metrics?: TestMetrics | null;
 }
 export interface ModelRegistry { registry_version: number; entries: RegistryEntry[]; note: string }
 export interface InvestigationEvent {

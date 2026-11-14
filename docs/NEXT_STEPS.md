@@ -98,6 +98,12 @@ Kaggle kernel `hoogle57/izqar-ieee-extended-cv-weight-1-25-candidate-v1` зав�
 
 ZIP SHA-256: BAF `c8b4384a671517a1e94889e173907f3f586eadd4156e09b1158de8f0b664b4d3`; PaySim `aa3ed5e80912805f851ebfac83ca60b80088a5f104109c925b376407b0b454d3`. Оба прошли ZIP CRC и импортированы `scripts/import_experiment_report.py` без model payload.
 
+### Unified IEEE loss weight 1.25 candidate
+
+Kaggle kernel `hoogle57/izqar-unified-ieee-weight-125-candidate-v3` завершил four-task validation-only run на commit `1525c8cd2155cc59ec1845611d69609892fc4b5c`. Он меняет ровно IEEE loss weight с `1.0` на `1.25`; все четыре task продолжают обновлять shared backbone. ZIP SHA-256 `ea3bc3b6e87266b704814750afa9aea18e9510d6730817dadf6a7d771cb54fff` прошёл CRC, pinned revision и validation-only gates и импортирован без model weights.
+
+PR-AUC вырос для PaySim (`0.038053`), IEEE (`0.190786`) и IBM (`0.013468`), но слегка снизился для BAF (`0.136371`) относительно исходной Unified validation. Поэтому candidate нельзя продвигать автоматически или называть улучшением всей Unified модели. Model Registry и UI показывают четыре task metrics отдельно; final test остаётся sealed.
+
 ## Локальные проверки и запуск
 
 ```powershell

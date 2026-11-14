@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { request } from './api';
-import type { ModelDetail, ModelPrediction, ModelRegistry, ModelStatus, RegistryEntry } from './api';
+import type { ModelDetail, ModelPrediction, ModelRegistry, ModelStatus, RegistryEntry, TestMetrics } from './api';
 import './ml-analytics.css';
 import './model-registry.css';
 
@@ -11,10 +11,16 @@ type SpecialistKind = 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml';
 type SelectedModel = SpecialistKind | 'unified_paysim' | 'unified_ieee_cis' | 'unified_baf_base' | 'unified_ibm_aml';
 const unifiedTask = (kind: SelectedModel): SpecialistKind | null => kind.startsWith('unified_') ? kind.slice('unified_'.length) as SpecialistKind : null;
 
+const isMetricSet = (value: unknown): value is TestMetrics => value !== null && typeof value === 'object' && 'f1' in value && 'average_precision_pr_auc' in value;
+
 function RegistryRow({ entry }: { entry: RegistryEntry }) {
   const label = entry.state === 'installed' ? 'Артефакт установлен' : entry.state === 'report_only' ? 'Только отчёт' : 'Ошибка метаданных';
   const lifecycle = entry.lifecycle === 'active' ? 'Активная' : entry.lifecycle === 'candidate' ? 'Кандидат · не обслуживает API' : 'Архив · не обслуживает API';
-  const quality = entry.test_metrics ? `Test F1 ${entry.test_metrics.f1.toFixed(3)} · PR-AUC ${entry.test_metrics.average_precision_pr_auc.toFixed(3)}` : entry.validation_metrics ? `Validation F1 ${entry.validation_metrics.f1.toFixed(3)} · PR-AUC ${entry.validation_metrics.average_precision_pr_auc.toFixed(3)}` : 'Нет проверенных метрик';
+  const validation = entry.validation_metrics;
+  const unifiedQuality = validation && !isMetricSet(validation)
+    ? Object.entries(validation).map(([task, result]) => `${names[task] ?? task}: F1 ${result.validation_metrics.f1.toFixed(3)} · PR-AUC ${result.validation_metrics.average_precision_pr_auc.toFixed(3)}`).join(' | ')
+    : null;
+  const quality = entry.test_metrics ? `Test F1 ${entry.test_metrics.f1.toFixed(3)} · PR-AUC ${entry.test_metrics.average_precision_pr_auc.toFixed(3)}` : isMetricSet(validation) ? `Validation F1 ${validation.f1.toFixed(3)} · PR-AUC ${validation.average_precision_pr_auc.toFixed(3)}` : unifiedQuality ? `Validation · ${unifiedQuality}` : 'Нет проверенных метрик';
   return <tr><td><strong>{names[entry.model_kind ?? entry.active_for ?? ''] ?? entry.model_kind ?? 'Неизвестная модель'}</strong><small>{lifecycle}</small></td>
     <td>{entry.model_version ?? '—'}</td><td>{label}{entry.error && <small>{entry.error}</small>}</td>
     <td>{quality}</td>
