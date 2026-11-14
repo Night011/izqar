@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_ieee import operating_profiles, ranking_metrics, split_chronologically, threshold_analysis, train
+from train_ieee import calibration_diagnostics, operating_profiles, ranking_metrics, split_chronologically, threshold_analysis, train
 
 
 def test_final_holdout_is_fixed_when_training_size_changes():
@@ -54,6 +54,15 @@ def test_validation_profiles_and_ranking_keep_constraints_explicit():
     assert ranking['2'] == {'alerts': 2, 'precision_at_k': .5, 'recall_at_k': .333333,
                             'true_positives_at_k': 1}
     assert ranking['10']['alerts'] == 6
+
+
+def test_calibration_diagnostics_are_bounded_and_not_probability_claims():
+    report = calibration_diagnostics(np.array([0, 0, 1, 1]), np.array([.1, .4, .6, .9]), bins=2)
+    assert report['brier_score_uncalibrated'] == .085
+    assert sum(item['cases'] for item in report['bins']) == 4
+    assert 'not calibrated' in report['warning']
+    with pytest.raises(ValueError, match=r'\[0, 1\]'):
+        calibration_diagnostics(np.array([0, 1]), np.array([-.1, 1.1]))
 
 
 def test_existing_report_is_not_overwritten(tmp_path):

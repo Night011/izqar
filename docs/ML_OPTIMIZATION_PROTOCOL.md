@@ -15,6 +15,7 @@
 Тренеры PaySim, IEEE-CIS, BAF Base и IBM AML сохраняют `experiment` с ID, код-ревизией, схемой признаков, split, параметрами, временем и доступным high-water RSS. Также есть:
 
 - `validation_ranking_metrics`: Precision@100/500/1000 и Recall@K;
+- `validation_calibration`: uncalibrated Brier score и непустые score bins с observed positive rate;
 - `validation_operating_profiles`:
   - **monitoring** — максимальный threshold, удерживающий validation Recall ≥ 80%, либо честная пометка, что условие недостижимо;
   - **analyst_review** — validation-selected operating point;
@@ -22,6 +23,7 @@
 - полный `threshold_analysis`, feature importance и предупреждения о применимости.
 
 Профили не являются банковскими policy: 80% — явная исследовательская настройка для сравнения, а не готовое правило блокировки.
+Калибровочные bins — диагностика над validation, а не разрешение называть score вероятностью. Отдельная калибровка требует зафиксированного дополнительного периода.
 
 ## Приоритеты исследований
 

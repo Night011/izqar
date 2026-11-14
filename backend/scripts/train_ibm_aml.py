@@ -29,7 +29,7 @@ from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
 from ibm_history_features import CausalAccountHistory, CausalHistoryStream, HISTORY_FEATURES
-from train_ieee import file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
+from train_ieee import calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
 
 EXPECTED_HEADER = [
     'Timestamp', 'From Bank', 'Account', 'To Bank', 'Account',
@@ -250,6 +250,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         'split_counts': {**counts, 'total': total, 'train_used': len(y_train)},
         'experiment': finish_experiment(experiment, started),
         'threshold': float(threshold), 'threshold_analysis': curve,
+        'validation_calibration': calibration_diagnostics(y_valid, valid_scores),
         'validation_ranking_metrics': ranking_metrics(y_valid, valid_scores),
         'validation_operating_profiles': operating_profiles(y_valid, valid_scores, threshold),
         'validation_metrics': validation_metrics, 'test_metrics': None, 'baseline_test_metrics': None,

@@ -30,7 +30,7 @@ from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardSc
 from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
-from train_ieee import operating_profiles, ranking_metrics
+from train_ieee import calibration_diagnostics, operating_profiles, ranking_metrics
 
 FEATURES = ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
 NUMERIC = ['amount', 'oldbalanceOrg', 'oldbalanceDest']
@@ -156,6 +156,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'experiment': finish_experiment(experiment, started),
         'features': FEATURES, 'numerical_features': NUMERIC, 'categorical_features': CATEGORICAL, 'pipeline': pipeline,
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
+        'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), valid_scores, threshold),
         'test_metrics': test_metrics,

@@ -27,7 +27,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
-from train_ieee import file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
+from train_ieee import calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics, threshold_analysis
 
 NUMERIC = [
     'income', 'name_email_similarity', 'prev_address_months_count',
@@ -152,6 +152,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
                          'validation': len(validation_rows), 'test': len(test_rows)},
         'experiment': finish_experiment(experiment, started),
         'threshold': float(threshold), 'threshold_analysis': threshold_report,
+        'validation_calibration': calibration_diagnostics(validation_rows.fraud_bool, valid_scores),
         'validation_ranking_metrics': ranking_metrics(validation_rows.fraud_bool, valid_scores),
         'validation_operating_profiles': operating_profiles(validation_rows.fraud_bool, valid_scores, threshold),
         'validation_metrics': valid_metrics, 'test_metrics': None, 'baseline_test_metrics': None,

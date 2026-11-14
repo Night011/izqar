@@ -122,6 +122,28 @@ def ranking_metrics(y_true, scores, ks: tuple[int, ...] = (100, 500, 1000)) -> d
     return results
 
 
+def calibration_diagnostics(y_true, scores, bins: int = 10) -> dict:
+    """Validation-only reliability diagnostics; scores remain uncalibrated."""
+    y, values = np.asarray(y_true, dtype=np.int8), np.asarray(scores, dtype=float)
+    if len(y) != len(values) or not len(y) or not np.isfinite(values).all() or (values < 0).any() or (values > 1).any():
+        raise ValueError('calibration diagnostics need finite scores in [0, 1]')
+    if bins < 2 or bins > 100:
+        raise ValueError('calibration bins must be between 2 and 100')
+    edges = np.linspace(0, 1, bins + 1)
+    assigned = np.minimum(np.searchsorted(edges, values, side='right') - 1, bins - 1)
+    output = []
+    for index in range(bins):
+        mask = assigned == index
+        if not mask.any():
+            continue
+        output.append({'lower': round(float(edges[index]), 6), 'upper': round(float(edges[index + 1]), 6),
+                       'cases': int(mask.sum()), 'mean_score': round(float(values[mask].mean()), 6),
+                       'observed_positive_rate': round(float(y[mask].mean()), 6)})
+    return {'brier_score_uncalibrated': round(float(np.mean((values - y) ** 2)), 6),
+            'bins': output,
+            'warning': 'Diagnostic only. Scores are not calibrated probabilities.'}
+
+
 def operating_profiles(y_true, scores, analyst_threshold: float,
                        monitoring_min_recall: float = .80,
                        high_confidence_min_precision: float = .80) -> dict:
@@ -363,6 +385,7 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None 
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True,
                                  'numeric_preprocessing': 'train-fitted standard scaling and clipping to [-20,20]'},
         'threshold_analysis': analysis,
+        'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), validation_scores),
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), validation_scores),
         'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), validation_scores, threshold),
         'feature_importance': importance,
