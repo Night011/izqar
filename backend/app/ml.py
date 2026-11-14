@@ -9,6 +9,10 @@ from .config import MODEL_PATH, PAYSIM_MODEL_PATH, BAF_MODEL_PATH, IBM_AML_MODEL
 from .model_registry import FORBIDDEN as FORBIDDEN_MODEL_FEATURES
 from .unified_network import TASKS as UNIFIED_TASKS, UnifiedNetwork
 
+PAYSIM_RAW_FEATURES = ('type', 'amount', 'oldbalanceOrg', 'oldbalanceDest')
+PAYSIM_V2_FEATURES = PAYSIM_RAW_FEATURES + ('amount_to_origin_balance', 'amount_to_destination_balance',
+                                            'destination_balance_is_zero')
+
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -274,9 +278,11 @@ def predict_paysim(features: dict):
     artifact = load_paysim_model()
     if artifact is None:
         return None
-    expected = artifact['features']
-    missing = [key for key in expected if key not in features]
-    unknown = sorted(set(features) - set(expected))
+    expected = tuple(artifact['features'])
+    if expected not in (PAYSIM_RAW_FEATURES, PAYSIM_V2_FEATURES):
+        raise ValueError('Unsupported PaySim artifact feature schema')
+    missing = [key for key in PAYSIM_RAW_FEATURES if key not in features]
+    unknown = sorted(set(features) - set(PAYSIM_RAW_FEATURES))
     if missing or unknown:
         detail = []
         if missing:
@@ -285,12 +291,20 @@ def predict_paysim(features: dict):
             detail.append(f"unsupported fields: {', '.join(unknown)}")
         raise ValueError('; '.join(detail))
     import pandas as pd
-    frame = pd.DataFrame([{key: features[key] for key in expected}], columns=expected)
+    frame = pd.DataFrame([{key: features[key] for key in PAYSIM_RAW_FEATURES}], columns=PAYSIM_RAW_FEATURES)
     frame['amount'] = pd.to_numeric(frame['amount'], errors='coerce')
     frame['oldbalanceOrg'] = pd.to_numeric(frame['oldbalanceOrg'], errors='coerce')
     frame['oldbalanceDest'] = pd.to_numeric(frame['oldbalanceDest'], errors='coerce')
     if frame[['amount', 'oldbalanceOrg', 'oldbalanceDest']].isna().any().any() or (frame[['amount', 'oldbalanceOrg', 'oldbalanceDest']] < 0).any().any():
         raise ValueError('amount, oldbalanceOrg and oldbalanceDest must be non-negative numbers')
+    if expected == PAYSIM_V2_FEATURES:
+        # These are pure functions of values supplied before the decision. Do
+        # not add ``oldbalanceOrg - amount``: on PaySim it proxies the banned
+        # observed post-event balance.
+        frame['amount_to_origin_balance'] = frame['amount'] / frame['oldbalanceOrg'].clip(lower=1.0)
+        frame['amount_to_destination_balance'] = frame['amount'] / frame['oldbalanceDest'].clip(lower=1.0)
+        frame['destination_balance_is_zero'] = (frame['oldbalanceDest'] == 0).astype('float32')
+        frame = frame.loc[:, expected]
     score = float(artifact['pipeline'].predict_proba(frame)[0, 1])
     return {'risk_score': round(score * 100, 2), 'threshold': artifact['threshold'],
             'flagged': score >= artifact['threshold'], 'source': 'paysim_ml',

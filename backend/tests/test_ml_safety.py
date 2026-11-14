@@ -1,6 +1,7 @@
 """Tests for schema boundaries and leakage guards; no external datasets required."""
 from pathlib import Path
 import sys
+import numpy as np
 import pytest
 
 pd = pytest.importorskip('pandas', reason='ML dependency not installed')
@@ -58,6 +59,30 @@ def test_paysim_v2_features_are_row_local_and_pre_transaction_only():
     assert result.loc[1, 'amount_to_origin_balance'] == 8.0
     assert result.loc[0, 'destination_balance_is_zero'] == 1.0
     assert 'amount_to_origin_balance' in numeric and categorical == ['type']
+
+
+def test_paysim_v2_inference_derives_only_allowlisted_features(monkeypatch):
+    import app.ml as ml
+
+    class Pipeline:
+        def predict_proba(self, frame):
+            assert list(frame) == list(ml.PAYSIM_V2_FEATURES)
+            assert frame.loc[0, 'amount_to_origin_balance'] == 0.5
+            assert frame.loc[0, 'amount_to_destination_balance'] == 50.0
+            assert frame.loc[0, 'destination_balance_is_zero'] == 1.0
+            assert 'origin_balance_after_requested_amount' not in frame
+            # sklearn predict_proba returns an indexable 2-D array.
+            return np.array([[.2, .8]])
+
+    artifact = {'features': list(ml.PAYSIM_V2_FEATURES), 'pipeline': Pipeline(), 'threshold': .7,
+                'model_version': 'unit-v4'}
+    monkeypatch.setattr(ml, 'load_paysim_model', lambda: artifact)
+    monkeypatch.setattr(ml, '_local_xgboost_explanation', lambda *_: [])
+    response = ml.predict_paysim({'type': 'TRANSFER', 'amount': 50., 'oldbalanceOrg': 100., 'oldbalanceDest': 0.})
+    assert response['flagged'] is True
+    with pytest.raises(ValueError, match='unsupported fields'):
+        ml.predict_paysim({'type': 'TRANSFER', 'amount': 50., 'oldbalanceOrg': 100., 'oldbalanceDest': 0.,
+                           'origin_balance_after_requested_amount': 50.})
 
 
 def test_paysim_loader_retains_original_label_only_for_training(tmp_path):
