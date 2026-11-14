@@ -36,6 +36,7 @@ def test_baf_base_train_and_final_holdout(tmp_path, client, auth, monkeypatch):
                    max_false_alerts_per_10000=None)
     assert not experiment.exists()
     assert report['test_metrics'] is None
+    assert report['run_mode'] == 'experiment'
     assert set(report['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     weighted = tmp_path / 'weighted.joblib'
     weighted_report = train(path, weighted, n_estimators=8, max_train_rows=100, mode='experiment',
@@ -48,6 +49,7 @@ def test_baf_base_train_and_final_holdout(tmp_path, client, auth, monkeypatch):
     final_report = train(path, final, n_estimators=8, mode='final',
                          max_false_alerts_per_10000=None)
     assert final.is_file()
+    assert final_report['run_mode'] == 'final'
     assert final_report['test_metrics']['cases'] == 50
     saved = json.loads(final.with_suffix('.metrics.json').read_text(encoding='utf-8'))
     assert saved['test_metrics'] == final_report['test_metrics']

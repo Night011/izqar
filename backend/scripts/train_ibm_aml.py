@@ -236,7 +236,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
     names = pre.get_feature_names_out()
     importance = sorted(zip(names, model.feature_importances_), key=lambda pair: float(pair[1]), reverse=True)
     report = {
-        'format_version': 2, 'model_kind': 'ibm_aml', 'model_version': 'ibm-aml-hi-small-xgboost-v1',
+        'format_version': 2, 'model_kind': 'ibm_aml', 'model_version': 'ibm-aml-hi-small-xgboost-v1', 'run_mode': mode,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'IBM AML HI-Small synthetic laundering transactions',
         'data_files': [file_provenance(data_path)],

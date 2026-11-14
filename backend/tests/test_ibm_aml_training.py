@@ -52,10 +52,12 @@ def test_ibm_aml_temporal_train_export_and_schema(tmp_path, client, auth, monkey
     experimental = train(path, experiment, mode='experiment', n_estimators=8,
                          max_train_rows=100, max_false_alerts_per_10000=None)
     assert experimental['test_metrics'] is None and not experiment.exists()
+    assert experimental['run_mode'] == 'experiment'
     assert set(experimental['validation_operating_profiles']) == {'monitoring', 'analyst_review', 'high_confidence'}
     final = tmp_path / 'final.joblib'
     report = train(path, final, mode='final', n_estimators=8,
                    max_train_rows=100, max_false_alerts_per_10000=None)
+    assert report['run_mode'] == 'final'
     assert report['test_metrics']['cases'] == 60
     assert report['test_metrics']['precision_at_1000'] >= 0
     assert json.loads(final.with_suffix('.metrics.json').read_text())['test_metrics'] == report['test_metrics']
@@ -97,6 +99,7 @@ def test_ibm_causal_history_candidate_is_experiment_only(tmp_path):
                    max_false_alerts_per_10000=None, feature_set='causal_history_v1', history_max_accounts=100)
     assert not candidate.exists()
     assert report['test_metrics'] is None
+    assert report['run_mode'] == 'experiment'
     assert set(HISTORY_FEATURES) <= set(report['features'])
     assert not {'Account', 'Account.1'} & set(report['features'])
     with pytest.raises(ValueError, match='validation-only candidate'):

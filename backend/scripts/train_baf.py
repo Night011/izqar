@@ -137,7 +137,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     encoded = preprocessing.get_feature_names_out()
     importance = sorted(zip(encoded, model.feature_importances_), key=lambda item: float(item[1]), reverse=True)
     report = {
-        'format_version': 2, 'model_kind': 'baf_base', 'model_version': 'baf-base-xgboost-v1',
+        'format_version': 2, 'model_kind': 'baf_base', 'model_version': 'baf-base-xgboost-v1', 'run_mode': mode,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'Feedzai BAF Base (synthetic account-opening applications)',
         'data_files': [file_provenance(data_path)],
