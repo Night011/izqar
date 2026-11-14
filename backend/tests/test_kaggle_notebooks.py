@@ -30,3 +30,15 @@ def test_specialist_notebooks_pin_reviewed_code_and_default_to_no_final_test():
         assert "EXPECTED_REVISION = '" in source
         assert "['git', 'checkout', '--detach', EXPECTED_REVISION]" in source
         assert 'RUN_FINAL = False' in source
+
+
+def test_ibm_graph_notebook_is_bounded_and_revision_pinned():
+    parsed = json.loads((ROOT / 'notebooks' / 'ibm_graph_kaggle.ipynb').read_text(encoding='utf-8'))
+    source = '\n'.join(''.join(cell.get('source', [])) for cell in parsed['cells'])
+    assert parsed['nbformat'] == 4
+    assert "EXPECTED_REVISION = '" in source
+    assert "['git', 'checkout', '--detach', EXPECTED_REVISION]" in source
+    assert "'analyze_ibm_graph.py'" in source
+    assert "'--max-rows', '500000'" in source
+    assert "'label_used': False" in source
+    assert 'train_ibm_aml.py' not in source
