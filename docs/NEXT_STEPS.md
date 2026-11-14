@@ -67,7 +67,7 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
 
 ### IBM AML causal-history candidate
 
-Повторный validation-only запуск уже создан как Kaggle kernel `hoogle57/izqar-ibm-aml-causal-history-candidate-v1` на commit `34656c00d64b2b3a0e997cd6f817fbba9fed933b`. Он выполняет `causal_history_v1` с disk-backed SQLite сортировкой истории по parsed timestamp и не экспортирует `joblib` либо final test. После завершения скачивайте только `izqar_ibm_causal_history_candidate_report.zip`, затем импортируйте его штатно:
+Повторный validation-only запуск завершён как Kaggle kernel `hoogle57/izqar-ibm-aml-causal-history-candidate-v1` на commit `34656c00d64b2b3a0e997cd6f817fbba9fed933b`. Он выполнил `causal_history_v1` с disk-backed SQLite сортировкой истории по parsed timestamp и не экспортировал `joblib` либо final test. ZIP SHA-256: `c7f9dd444883ea7e8dcfd2fbf90b656d88a5b2aac8e92350884ea7f3141ebaed`; он уже безопасно импортирован как report-only candidate. Для повторяемого импорта используйте:
 
 ```powershell
 cd C:\Users\a\Documents\IZQAR-MVP\backend
@@ -76,7 +76,7 @@ cd C:\Users\a\Documents\IZQAR-MVP\backend
   --output-dir models\experiments
 ```
 
-Импортёр проверяет лимит размера, плоскую структуру ZIP, pinned SHA ревизии и отсутствие final test; он не десериализует модели. Сравнивайте только validation с текущим IBM baseline и не меняйте active-артефакт без отдельного решения.
+Импортёр проверяет лимит размера, плоскую структуру ZIP, pinned SHA ревизии и отсутствие final test; он не десериализует модели. На одинаковом validation окне candidate дал PR-AUC `0.099919` против `0.031192`, Recall `0.592105` против `0.361842` и F1 `0.102424` против `0.064050` при 99.489 против 99.161 FP/10k. Это достаточное основание для дальнейшего controlled validation research, но не для использования уже просмотренного final test, automatic promotion или замены active-артефакта.
 
 ## Локальные проверки и запуск
 
