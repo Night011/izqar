@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, Check, Clock, GitBranch, MessageSquare, Search, ShieldAlert } from 'lucide-react';
 import { Graph } from './Graph';
 import { money, request, shortDate } from './api';
-import type { GraphData, InvestigationDetail, InvestigationList, Review, Transaction } from './api';
+import type { GraphData, InvestigationDetail, InvestigationList, ModelStatus, Review, Transaction } from './api';
 import './investigations.css';
 
 const stateText: Record<Review, string> = {
@@ -18,6 +18,11 @@ const actions: { state: Review; label: string }[] = [
   { state: 'confirmed_fraud', label: 'Подтвердить мошенничество' },
   { state: 'false_positive', label: 'Ложная тревога' },
 ];
+function assessmentSchema(model: string, status: ModelStatus | null): string[] {
+  const unifiedTask = model.startsWith('unified_') ? model.slice('unified_'.length) : null;
+  if (unifiedTask) return status?.unified_mtl?.task_schemas[unifiedTask] ?? [];
+  return status?.[model as 'paysim' | 'ieee_cis' | 'baf_base' | 'ibm_aml']?.feature_names ?? [];
+}
 
 function caseGraph(detail: InvestigationDetail): GraphData {
   const transactions = [detail.transaction, ...detail.related_transactions];
@@ -52,8 +57,8 @@ function caseGraph(detail: InvestigationDetail): GraphData {
   };
 }
 
-export function InvestigationWorkspace({ apiKey, initialId, onChanged }: {
-  apiKey: string; initialId: string | null; onChanged: () => Promise<void>;
+export function InvestigationWorkspace({ apiKey, initialId, modelStatus, onChanged }: {
+  apiKey: string; initialId: string | null; modelStatus: ModelStatus | null; onChanged: () => Promise<void>;
 }) {
   const [list, setList] = useState<InvestigationList>({ total: 0, items: [] });
   const [detail, setDetail] = useState<InvestigationDetail | null>(null);
@@ -64,6 +69,8 @@ export function InvestigationWorkspace({ apiKey, initialId, onChanged }: {
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
   const [comment, setComment] = useState('');
+  const [assessmentModel, setAssessmentModel] = useState('paysim');
+  const [assessmentInput, setAssessmentInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -116,6 +123,24 @@ export function InvestigationWorkspace({ apiKey, initialId, onChanged }: {
     finally { setBusy(false); }
   };
 
+  const assessmentFeatures = assessmentSchema(assessmentModel, modelStatus);
+  const assessmentTemplate = () => setAssessmentInput(JSON.stringify(
+    Object.fromEntries(assessmentFeatures.map(feature => [feature, null])), null, 2));
+  const addAssessment = async () => {
+    if (!selectedId) return;
+    setBusy(true); setError('');
+    try {
+      const features = JSON.parse(assessmentInput) as unknown;
+      if (!features || typeof features !== 'object' || Array.isArray(features)) throw new Error('Введите JSON-объект точной модельной схемы');
+      await request(`/api/v1/investigations/${encodeURIComponent(selectedId)}/ml-assessments`, apiKey,
+        { method: 'POST', body: JSON.stringify({ model: assessmentModel, features }) });
+      setDetail(await request<InvestigationDetail>(`/api/v1/investigations/${encodeURIComponent(selectedId)}`, apiKey));
+      setAssessmentInput('');
+      await Promise.all([loadList(), onChanged()]);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const graph = useMemo(() => detail ? caseGraph(detail) : null, [detail]);
   return <div className="investigation-layout">
     <section className="panel investigation-queue">
@@ -149,6 +174,7 @@ export function InvestigationWorkspace({ apiKey, initialId, onChanged }: {
           <p className="case-caveat">Риск рассчитан демонстрационными правилами. Наличие сигнала или связи не подтверждает мошенничество.</p>
           <h3><ShieldAlert size={16}/> ML-оценки дела</h3>
           {detail.ml_assessments.length ? <div className="case-events">{detail.ml_assessments.map(assessment => <div key={assessment.id}><strong>{assessment.model_key} · {assessment.flagged ? 'выше порога' : 'ниже порога'} · скор {assessment.risk_score.toFixed(2)}/100</strong><small>{assessment.model_version} · {assessment.score_kind} · схема: {assessment.feature_names.join(', ')}</small><p>{assessment.warning}</p></div>)}</div> : <p className="case-caveat">ML-оценок нет. Демо-перевод не сопоставляется автоматически с иной схемой датасета.</p>}
+          <div className="case-comment"><select aria-label="Модель для оценки дела" value={assessmentModel} onChange={e => { setAssessmentModel(e.target.value); setAssessmentInput(''); }}><option value="paysim" disabled={!modelStatus?.paysim}>PaySim</option><option value="ieee_cis" disabled={!modelStatus?.ieee_cis}>IEEE-CIS</option><option value="baf_base" disabled={!modelStatus?.baf_base}>BAF Base</option><option value="ibm_aml" disabled={!modelStatus?.ibm_aml}>IBM AML</option>{modelStatus?.unified_mtl && <optgroup label="Unified Intelligence · эксперимент"><option value="unified_paysim">Unified · PaySim</option><option value="unified_ieee_cis">Unified · IEEE-CIS</option><option value="unified_baf_base">Unified · BAF Base</option><option value="unified_ibm_aml">Unified · IBM AML</option></optgroup>}</select><button type="button" disabled={!assessmentFeatures.length} onClick={assessmentTemplate}>Шаблон точной схемы</button><textarea aria-label="JSON ML assessment" spellCheck={false} value={assessmentInput} onChange={e => setAssessmentInput(e.target.value)} placeholder="Только признаки выбранной модели; значения не сохраняются в деле" /><button disabled={busy || !assessmentInput.trim()} onClick={addAssessment}>Выполнить и прикрепить ML-оценку</button></div>
           <h3><GitBranch size={16}/> Связанные счета и операции</h3>
           {graph && <Graph data={graph} />}
           <div className="case-related">{detail.related_transactions.length ? detail.related_transactions.map(tx => <button key={tx.id} onClick={() => setSelectedId(tx.id)}>
