@@ -29,14 +29,15 @@ def test_ibm_graph_finds_bounded_fan_chain_and_cycle_without_labels(tmp_path):
     assert report['rapid_transfer_chains'][0]['path'] == ['A', 'B', 'C']
 
 
-def test_ibm_graph_rejects_non_chronological_input(tmp_path):
+def test_ibm_graph_externally_orders_non_chronological_input(tmp_path):
     path = tmp_path / 'HI-Small_Trans.csv'
     write_csv(path, [
-        ['2022-01-01 00:01:00', '1', 'A', '2', 'B', '1', 'USD', '10', 'USD', 'ACH', '0'],
-        ['2022-01-01 00:00:00', '1', 'B', '2', 'C', '1', 'USD', '9', 'USD', 'ACH', '1'],
+        ['2022-01-01 00:01:00', '1', 'B', '2', 'C', '1', 'USD', '10', 'USD', 'ACH', '0'],
+        ['2022-01-01 00:00:00', '1', 'A', '2', 'B', '1', 'USD', '9', 'USD', 'ACH', '1'],
     ])
-    with pytest.raises(ValueError, match='chronologically ordered'):
-        analyze(path)
+    report = analyze(path, max_rows=2, rapid_seconds=120)
+    assert report['rows_analyzed'] == 2
+    assert report['rapid_transfer_chains'][0]['path'] == ['A', 'B', 'C']
 
 
 def test_ibm_graph_accepts_hi_small_slash_minute_timestamps(tmp_path):

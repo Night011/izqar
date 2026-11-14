@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sqlite3
+import tempfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ from train_ibm_aml import EXPECTED_HEADER, validate_file
 
 
 MAX_ROWS_DEFAULT = 500_000
+SQLITE_INSERT_BATCH = 50_000
 
 
 def _timestamp(value: str) -> datetime:
@@ -33,6 +36,55 @@ def _timestamp(value: str) -> datetime:
     raise ValueError(f'Invalid IBM AML timestamp: {value!r}')
 
 
+def iter_chronological_transfers(path: Path, max_rows: int):
+    """Yield the earliest bounded transfer window in causal timestamp order.
+
+    The official HI-Small source is not physically chronological.  A temporary
+    SQLite index sorts only timestamp, account keys and paid amount on disk,
+    avoiding both future-history signals and an in-memory multi-million-row
+    graph.  ``Is Laundering`` is deliberately never inserted or selected.
+    """
+    with tempfile.TemporaryDirectory(prefix='izqar-ibm-graph-') as temporary:
+        database = Path(temporary) / 'graph-sort.sqlite3'
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute('CREATE TABLE transfers (at TEXT NOT NULL, sender TEXT NOT NULL, recipient TEXT NOT NULL, amount REAL NOT NULL)')
+            pending = []
+            with path.open('r', encoding='utf-8-sig', newline='') as stream:
+                reader = csv.reader(stream)
+                header = next(reader, None)
+                if header != EXPECTED_HEADER:
+                    raise ValueError('Unexpected IBM AML header')
+                for raw in reader:
+                    if len(raw) != len(EXPECTED_HEADER):
+                        raise ValueError('Malformed IBM AML row')
+                    at = _timestamp(raw[0])
+                    sender, recipient = raw[2], raw[4]
+                    if not sender or not recipient:
+                        raise ValueError('IBM graph analysis requires nonempty account identifiers')
+                    try:
+                        amount = float(raw[7])
+                    except ValueError as exc:
+                        raise ValueError('Amount Paid must be numeric') from exc
+                    if amount < 0:
+                        raise ValueError('Amount Paid must be nonnegative')
+                    pending.append((at.isoformat(sep=' '), sender, recipient, amount))
+                    if len(pending) >= SQLITE_INSERT_BATCH:
+                        connection.executemany('INSERT INTO transfers VALUES (?, ?, ?, ?)', pending)
+                        connection.commit()
+                        pending.clear()
+            if pending:
+                connection.executemany('INSERT INTO transfers VALUES (?, ?, ?, ?)', pending)
+                connection.commit()
+            connection.execute('CREATE INDEX timestamp_order ON transfers (at ASC)')
+            for at, sender, recipient, amount in connection.execute(
+                    'SELECT at, sender, recipient, amount FROM transfers ORDER BY at ASC, rowid ASC LIMIT ?',
+                    (max_rows,)):
+                yield datetime.fromisoformat(at), sender, recipient, float(amount)
+        finally:
+            connection.close()
+
+
 def analyze(path: Path, max_rows: int = MAX_ROWS_DEFAULT, rapid_seconds: int = 900,
             min_degree: int = 3, max_results: int = 50) -> dict:
     """Summarise directed transfer structure without using labels or future history."""
@@ -46,43 +98,20 @@ def analyze(path: Path, max_rows: int = MAX_ROWS_DEFAULT, rapid_seconds: int = 9
     latest_inbound: dict[str, tuple[datetime, str, float]] = {}
     rapid_chains: list[dict] = []
     rows = 0
-    previous_time: datetime | None = None
-    with path.open('r', encoding='utf-8-sig', newline='') as stream:
-        reader = csv.reader(stream)
-        header = next(reader, None)
-        if header != EXPECTED_HEADER:
-            raise ValueError('Unexpected IBM AML header')
-        for raw in reader:
-            if rows >= max_rows:
-                break
-            if len(raw) != len(EXPECTED_HEADER):
-                raise ValueError('Malformed IBM AML row')
-            at = _timestamp(raw[0])
-            if previous_time is not None and at < previous_time:
-                raise ValueError('IBM graph input must be chronologically ordered')
-            previous_time = at
-            sender, recipient = raw[2], raw[4]
-            if not sender or not recipient:
-                raise ValueError('IBM graph analysis requires nonempty account identifiers')
-            try:
-                amount = float(raw[7])
-            except ValueError as exc:
-                raise ValueError('Amount Paid must be numeric') from exc
-            if amount < 0:
-                raise ValueError('Amount Paid must be nonnegative')
-            inbound = latest_inbound.get(sender)
-            if inbound is not None:
-                earlier_at, origin, earlier_amount = inbound
-                delta = (at - earlier_at).total_seconds()
-                if 0 <= delta <= rapid_seconds and len(rapid_chains) < max_results:
-                    rapid_chains.append({'path': [origin, sender, recipient],
-                                         'seconds_between': round(delta, 3),
-                                         'amounts': [round(earlier_amount, 2), round(amount, 2)]})
-            latest_inbound[recipient] = (at, sender, amount)
-            out_count[sender] += 1; out_amount[sender] += amount
-            in_count[recipient] += 1; in_amount[recipient] += amount
-            edges.add((sender, recipient))
-            rows += 1
+    for at, sender, recipient, amount in iter_chronological_transfers(path, max_rows):
+        inbound = latest_inbound.get(sender)
+        if inbound is not None:
+            earlier_at, origin, earlier_amount = inbound
+            delta = (at - earlier_at).total_seconds()
+            if 0 <= delta <= rapid_seconds and len(rapid_chains) < max_results:
+                rapid_chains.append({'path': [origin, sender, recipient],
+                                     'seconds_between': round(delta, 3),
+                                     'amounts': [round(earlier_amount, 2), round(amount, 2)]})
+        latest_inbound[recipient] = (at, sender, amount)
+        out_count[sender] += 1; out_amount[sender] += amount
+        in_count[recipient] += 1; in_amount[recipient] += amount
+        edges.add((sender, recipient))
+        rows += 1
     fan_in = sorted(({'account': account, 'incoming_transfers': count,
                       'incoming_amount': round(in_amount[account], 2)}
                      for account, count in in_count.items() if count >= min_degree),
@@ -108,7 +137,7 @@ def analyze(path: Path, max_rows: int = MAX_ROWS_DEFAULT, rapid_seconds: int = 9
                                                   'min_degree': min_degree, 'max_results': max_results},
             'fan_in': fan_in, 'fan_out': fan_out, 'rapid_transfer_chains': rapid_chains,
             'directed_three_node_cycles': cycles,
-            'warning': ('Structural signals use only prior chronological rows and are investigation leads, '
+            'warning': ('Structural signals use only prior chronological rows after external time ordering and are investigation leads, '
                         'not proof of laundering or a substitute for the IBM AML model.')}
 
 
