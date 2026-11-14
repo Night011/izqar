@@ -4,7 +4,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,64 @@ from .model_registry import list_registry
 from .model_registry import FORBIDDEN
 from .ml import load_model, load_paysim_model, load_baf_model, load_ibm_aml_model, load_unified_model, predict_ieee, predict_paysim, predict_baf, predict_ibm_aml, predict_unified
 
+
+MAX_API_BODY_BYTES = 64 * 1024
+
+
+class _ApiBodyTooLarge(Exception):
+    """Internal ASGI signal converted to a 413 before endpoint code runs."""
+
+
+class ApiBodyLimitMiddleware:
+    """Bound request bytes even when a client omits or lies about Content-Length."""
+
+    def __init__(self, app, max_body_bytes: int = MAX_API_BODY_BYTES):
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or not scope.get('path', '').startswith('/api/v1/'):
+            await self.app(scope, receive, send)
+            return
+        headers = {key.lower(): value for key, value in scope.get('headers', [])}
+        raw_length = headers.get(b'content-length')
+        if raw_length is not None:
+            try:
+                declared = int(raw_length)
+                if declared < 0:
+                    raise ValueError
+            except ValueError:
+                await JSONResponse(status_code=400, content={'detail': 'Invalid Content-Length'})(scope, receive, send)
+                return
+            if declared > self.max_body_bytes:
+                await JSONResponse(status_code=413, content={'detail': f'Request body exceeds {self.max_body_bytes} byte limit'})(scope, receive, send)
+                return
+        received = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message['type'] == 'http.request':
+                received += len(message.get('body', b''))
+                if received > self.max_body_bytes:
+                    raise _ApiBodyTooLarge
+            return message
+
+        async def tracked_send(message):
+            nonlocal response_started
+            if message['type'] == 'http.response.start':
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracked_send)
+        except _ApiBodyTooLarge:
+            # Body parsing precedes endpoint output. Keep the guard for future
+            # streaming endpoints, which must not produce a second response.
+            if not response_started:
+                await JSONResponse(status_code=413, content={'detail': f'Request body exceeds {self.max_body_bytes} byte limit'})(scope, receive, send)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_config()
@@ -31,25 +89,12 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title='IZQAR Fraud Prevention MVP', version='0.1.0', lifespan=lifespan)
+# Add CORS last: it wraps the limiter so browser clients receive CORS headers
+# even for an over-limit request rejected before FastAPI parses its JSON body.
+app.add_middleware(ApiBodyLimitMiddleware, max_body_bytes=MAX_API_BODY_BYTES)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=False,
                    allow_methods=['GET', 'POST', 'PATCH'], allow_headers=['X-API-Key', 'Content-Type'])
 app.mount('/demo', StaticFiles(directory=Path(__file__).parent / 'static', html=True), name='demo')
-
-MAX_API_BODY_BYTES = 64 * 1024
-
-
-@app.middleware('http')
-async def reject_oversized_api_request(request: Request, call_next):
-    """Reject known oversized API bodies before parsers or ML code allocate them."""
-    if request.url.path.startswith('/api/v1/'):
-        raw_length = request.headers.get('content-length')
-        if raw_length is not None:
-            try:
-                if int(raw_length) > MAX_API_BODY_BYTES:
-                    return JSONResponse(status_code=413, content={'detail': 'Request body exceeds 65536 byte limit'})
-            except ValueError:
-                return JSONResponse(status_code=400, content={'detail': 'Invalid Content-Length'})
-    return await call_next(request)
 
 
 def require_key(x_api_key: str | None = Header(default=None)):

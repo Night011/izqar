@@ -1,3 +1,6 @@
+import asyncio
+
+
 def test_health_and_access_control(client, auth):
     assert client.get('/health').status_code == 200
     assert client.get('/api/v1/transactions').status_code == 401
@@ -68,13 +71,53 @@ def test_api_rejects_oversized_or_invalid_content_length(client, auth):
     assert too_large.status_code == 413
     invalid = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': 'not-a-length'}, content=b'{}')
     assert invalid.status_code == 400
+    negative = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': '-1'}, content=b'{}')
+    assert negative.status_code == 400
     # Non-API routes and ordinary valid API requests retain their existing behavior.
     assert client.get('/demo/').status_code == 200
     assert client.post('/api/v1/transfers', headers=auth,
                        json={'sender': 'BODY-001', 'recipient': 'BODY-002', 'amount': 1}).status_code == 200
 
 
+def test_api_body_limiter_counts_chunked_bytes_without_content_length():
+    """A chunked transport must not bypass the declared-header check."""
+    from app.main import ApiBodyLimitMiddleware
+
+    chunks = iter([
+        {'type': 'http.request', 'body': b'12345', 'more_body': True},
+        {'type': 'http.request', 'body': b'67890', 'more_body': False},
+    ])
+    sent = []
+
+    async def receive():
+        return next(chunks)
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(scope, receive, send):
+        while True:
+            message = await receive()
+            if not message.get('more_body', False):
+                break
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    scope = {'type': 'http', 'path': '/api/v1/paysim/predict', 'headers': []}
+    asyncio.run(ApiBodyLimitMiddleware(downstream, max_body_bytes=8)(scope, receive, send))
+    assert sent[0]['type'] == 'http.response.start'
+    assert sent[0]['status'] == 413
+
+
 def test_autonomous_demo_page(client):
     response = client.get('/demo/')
     assert response.status_code == 200
     assert 'IZQAR' in response.text
+
+
+def test_api_body_limit_keeps_cors_headers(client, auth):
+    response = client.post('/api/v1/transfers', headers={
+        **auth, 'Origin': 'http://localhost:5173', 'Content-Length': '65537',
+    }, content=b'{}')
+    assert response.status_code == 413
+    assert response.headers['access-control-allow-origin'] == 'http://localhost:5173'
