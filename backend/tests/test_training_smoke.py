@@ -107,6 +107,8 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
         assert status.status_code == 200
         assert status.json()['ieee_cis']['model_version'] == 'ieee-cis-xgboost-v2'
         assert status.json()['paysim']['model_version'] == 'paysim-xgboost-v1'
+        assert status.json()['ieee_cis']['validation_ranking_metrics']['100']['alerts'] > 0
+        assert status.json()['paysim']['validation_operating_profiles']['analyst_review']['metrics']['cases'] > 0
         pay_features = {'type': 'TRANSFER', 'amount': 25, 'oldbalanceOrg': 110, 'oldbalanceDest': 5}
         pay_response = client.post('/api/v1/paysim/predict', json={'features': pay_features}, headers=auth)
         assert pay_response.status_code == 200, pay_response.text

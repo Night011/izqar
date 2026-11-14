@@ -244,6 +244,8 @@ def model_status():
                 'trained_at_utc': artifact.get('trained_at_utc'),
                 'split_counts': artifact.get('split_counts', {}),
                 'score_kind': 'uncalibrated_ml_score',
+                'validation_ranking_metrics': artifact.get('validation_ranking_metrics'),
+                'validation_operating_profiles': artifact.get('validation_operating_profiles'),
                 'feature_importance': artifact.get('feature_importance', {}).get('top_30', [])[:10]}
     try:
         artifact = load_model()
