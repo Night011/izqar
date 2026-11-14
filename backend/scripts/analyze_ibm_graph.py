@@ -20,10 +20,17 @@ MAX_ROWS_DEFAULT = 500_000
 
 
 def _timestamp(value: str) -> datetime:
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError(f'Invalid IBM AML timestamp: {value!r}') from exc
+    # HI-Small uses slash-separated minute timestamps (for example
+    # ``2022/09/01 00:20``), while small fixtures and future exports may use
+    # ISO-like dashes and optional seconds.  Keep accepted formats explicit so
+    # a malformed date cannot silently change chronological causality.
+    for pattern in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M',
+                    '%Y/%m/%d %H:%M:%S', '%Y/%m/%d %H:%M'):
+        try:
+            return datetime.strptime(value, pattern)
+        except ValueError:
+            continue
+    raise ValueError(f'Invalid IBM AML timestamp: {value!r}')
 
 
 def analyze(path: Path, max_rows: int = MAX_ROWS_DEFAULT, rapid_seconds: int = 900,

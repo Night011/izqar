@@ -37,3 +37,14 @@ def test_ibm_graph_rejects_non_chronological_input(tmp_path):
     ])
     with pytest.raises(ValueError, match='chronologically ordered'):
         analyze(path)
+
+
+def test_ibm_graph_accepts_hi_small_slash_minute_timestamps(tmp_path):
+    path = tmp_path / 'HI-Small_Trans.csv'
+    write_csv(path, [
+        ['2022/09/01 00:20', '1', 'A', '2', 'B', '1', 'USD', '10', 'USD', 'ACH', '0'],
+        ['2022/09/01 00:21', '1', 'B', '2', 'C', '1', 'USD', '9', 'USD', 'ACH', '1'],
+    ])
+    report = analyze(path, max_rows=2, rapid_seconds=120)
+    assert report['rows_analyzed'] == 2
+    assert report['rapid_transfer_chains'][0]['path'] == ['A', 'B', 'C']
