@@ -10,7 +10,14 @@
 
 ## После экспорта
 
-1. Скопируйте только доверенные три файла в `backend/models/` с именами `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json`.
+1. Скачайте `izqar_unified_artifacts.zip`, затем безопасно установите все четыре проверенные компонента одной командой. Установщик сверяет зафиксированные SHA-256 и откажется от подменённого архива или перезаписи существующего артефакта:
+
+```powershell
+cd C:\Users\a\Documents\IZQAR-MVP\backend
+.\.venv\Scripts\python.exe scripts\install_unified_artifact.py --archive "F:\download\izqar_unified_artifacts.zip"
+```
+
+Не извлекайте ZIP вручную в `models/`: это обходит проверку происхождения. Скрипт сохранит `unified_weights.npz`, `unified_preprocessors.joblib`, `unified.metrics.json` и `unified_checkpoint.pt`.
 2. Не меняйте `.env`, если используется путь по умолчанию. Для другого манифеста укажите `IZQAR_UNIFIED_MODEL_PATH=<путь к unified.metrics.json>`.
 3. Запустите:
 
