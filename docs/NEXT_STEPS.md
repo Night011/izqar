@@ -124,6 +124,8 @@ API уже умеет безопасно обслужить будущий appro
   --output models\paysim_v5_pre_transaction_v2_sealed.joblib
 ```
 
+Этот sealed run уже успешно выполнен один раз в Kaggle (`hoogle57/izqar-paysim-v2-sealed-final-v1`, revision `60479fc426f911de3d466537626b6b051cf4a939`): test F1 `0.852542`, PR-AUC `0.967377`, Recall `0.752618`, 52 FP и 992 FN на 955 744 synthetic операциях. ZIP SHA-256 `029F607A62055B72DFFFDDA8D8B86704C16840F15B67A1927C6818EBC2646CF0` прошёл CRC. Не запускайте эту команду повторно. До promotion нужно изолированно подтвердить корректный transform trusted scikit-learn `1.6.1` preprocessing в локальном `1.9.1` runtime; текущий secure installer намеренно отказался от несовместимого pickle.
+
 Сравнивайте с active v1 и weight candidates на одном validation period: общий Recall/F1/PR-AUC, FP/10k, срезы TRANSFER/CASH_OUT и preprocessing stress. Не использовать final test для выбора.
 
 ### Unified IEEE loss weight 1.25 candidate
