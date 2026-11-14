@@ -1,6 +1,7 @@
 """Pure protocol tests for the Kaggle-only joint trainer."""
 import json
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -13,6 +14,14 @@ from sklearn.preprocessing import FunctionTransformer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from app.unified_network import TASKS, required_shapes
 from train_unified import baf, balanced_cap, choose_threshold, final_evaluation, ieee, metrics, parse_task_weights, resolve_device, transformer  # noqa: E402
+
+
+def test_unified_trainer_cli_imports_app_when_run_directly():
+    """Kaggle invokes this script by path, not with ``python -m``."""
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'train_unified.py'
+    result = subprocess.run([sys.executable, str(script), '--help'], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert '--task-weights' in result.stdout
 
 
 def test_training_adapter_is_train_fitted_and_handles_unknown_categories():
