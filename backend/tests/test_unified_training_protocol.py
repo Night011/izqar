@@ -13,7 +13,7 @@ from sklearn.preprocessing import FunctionTransformer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from app.unified_network import TASKS, required_shapes
-from train_unified import (baf, balanced_cap, choose_threshold, early_stop_reached, experiment_provenance, final_evaluation,
+from train_unified import (baf, balanced_cap, choose_threshold, early_stop_reached, experiment_provenance, final_evaluation, macro_normalized_pr_lift,
                            ieee, metrics, parse_task_weights, resolve_device, transformer)  # noqa: E402
 
 
@@ -48,6 +48,8 @@ def test_unified_early_stopping_waits_for_exact_patience():
     assert not early_stop_reached(best_epoch=3, current_epoch=5, patience=3)
     assert early_stop_reached(best_epoch=3, current_epoch=6, patience=3)
     assert not early_stop_reached(best_epoch=3, current_epoch=100, patience=None)
+    score = macro_normalized_pr_lift({task: .2 for task in TASKS}, {task: .1 for task in TASKS})
+    assert score == pytest.approx(1 / 9)
 
 
 def test_unified_experiment_provenance_is_explicit_and_copies_weights():

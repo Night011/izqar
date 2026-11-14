@@ -75,6 +75,12 @@ def early_stop_reached(best_epoch: int, current_epoch: int, patience: int | None
     return patience is not None and current_epoch - best_epoch >= patience
 
 
+def macro_normalized_pr_lift(pr_auc: dict[str, float], prevalence: dict[str, float]) -> float:
+    """Equal-task PR lift above each task's own random baseline."""
+    return float(np.mean([(pr_auc[name] - prevalence[name]) / max(1.0 - prevalence[name], 1e-12)
+                          for name in TASKS]))
+
+
 def metrics(y, scores, threshold):
     predicted = (scores >= threshold).astype(int)
     tn, fp, fn, tp = confusion_matrix(y, predicted, labels=[0, 1]).ravel()
@@ -267,7 +273,7 @@ def main():
                         help='optional deterministic cap for a one-time final test; omit for the entire sealed window')
     parser.add_argument('--epochs', type=int, default=12)
     parser.add_argument('--early-stopping-patience', type=int, default=None,
-                        help='Experiment-only patience in epochs for summed validation PR-AUC across four tasks')
+                        help='Experiment-only patience in epochs for equal-task normalized validation PR lift')
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--device', default='auto', choices=['auto','cpu','cuda'])
     parser.add_argument('--task-weights', default=None,
@@ -331,16 +337,18 @@ def main():
                 weight=torch.tensor([(len(y)-y.sum())/max(y.sum(),1)],device=device); optimiser.zero_grad(set_to_none=True)
                 loss=task_weights[name] * F.binary_cross_entropy_with_logits(model(name, xb),yb,pos_weight=weight); loss.backward(); optimiser.step(); values.append(float(loss.detach().cpu()))
             losses[name]=round(float(np.mean(values)),6)
-        model.eval(); score=0; epoch_metrics={}
+        model.eval(); epoch_metrics={}; prevalence={}
         with torch.no_grad():
             for name in TASKS:
-                _,_,x,y=prepared[name]; s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); epoch_metrics[name]=round(float(average_precision_score(y,s)),6); score += epoch_metrics[name]
-        history.append({'epoch':epoch+1,'loss':losses,'validation_pr_auc':epoch_metrics})
+                _,_,x,y=prepared[name]; s=torch.sigmoid(model(name,torch.tensor(x,device=device))).cpu().numpy(); epoch_metrics[name]=round(float(average_precision_score(y,s)),6); prevalence[name]=float(np.mean(y))
+        score = macro_normalized_pr_lift(epoch_metrics, prevalence)
+        history.append({'epoch':epoch+1,'loss':losses,'validation_pr_auc':epoch_metrics,
+                        'selection_macro_normalized_pr_lift':round(score, 8)})
         if score > best:
             best, best_epoch, best_state = score, epoch + 1, {key:value.detach().cpu().clone() for key,value in model.state_dict().items()}
             args.output_dir.mkdir(parents=True, exist_ok=True)
             torch.save({'epoch': epoch + 1, 'state_dict': best_state, 'optimizer_state': optimiser.state_dict(),
-                        'validation_pr_auc_sum': best, 'seed': RNG}, args.output_dir/'unified_checkpoint.pt')
+                        'selection_macro_normalized_pr_lift': best, 'seed': RNG}, args.output_dir/'unified_checkpoint.pt')
         elif early_stop_reached(best_epoch, epoch + 1, args.early_stopping_patience):
             stop_reason = 'validation_pr_auc_patience_exhausted'
             break
@@ -358,7 +366,9 @@ def main():
             'tasks':outputs,'input_dimensions':dimensions,'gradient_audit_shared_backbone_l2':gradient_audit,
             'training':{'epochs':args.epochs,'batch_size':args.batch_size,'device':device,
                         'loss':'per-task positive-weighted BCE with explicit task weights and equal task update rounds',
-                        'task_weights':task_weights,'seed':RNG,'best_validation_pr_auc_sum':best,
+                        'task_weights':task_weights,'seed':RNG,
+                        'selection_metric':'macro normalized PR-AUC lift above per-task prevalence',
+                        'best_validation_macro_normalized_pr_lift':best,
                         'best_epoch':best_epoch, 'epochs_ran':len(history),
                         'early_stopping_patience':args.early_stopping_patience, 'stop_reason':stop_reason,
                         'seconds':round(time.monotonic()-started,3),'history':history},
