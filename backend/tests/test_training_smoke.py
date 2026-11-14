@@ -60,6 +60,15 @@ def test_both_trainers_create_separate_artifacts(tmp_path, client, auth, monkeyp
     with pytest.raises(ValueError, match='validation-only'):
         train_paysim(paysim_path, tmp_path / 'paysim_weighted_final.joblib', 8, None,
                      positive_weight_multiplier=1.5)
+    engineered_pay = tmp_path / 'experiments' / 'paysim_engineered.joblib'
+    engineered_report = train_paysim(paysim_path, engineered_pay, n_estimators=8, max_rows=None,
+                                     mode='experiment', feature_set='pre_transaction_v2')
+    assert not engineered_pay.exists()
+    assert engineered_report['experiment']['hyperparameters']['feature_set'] == 'pre_transaction_v2'
+    assert 'amount_to_origin_balance' in engineered_report['features']
+    with pytest.raises(ValueError, match='validation-only'):
+        train_paysim(paysim_path, tmp_path / 'paysim_engineered_final.joblib', 8, None,
+                     feature_set='pre_transaction_v2')
     with pytest.raises(FileExistsError, match='Output already exists'):
         train_paysim(paysim_path, pay_model, 8, None)
     pay_audit = audit_paysim_validation(paysim_path, pay_model, pay_model.with_name(pay_model.stem + '.validation_audit.json'))

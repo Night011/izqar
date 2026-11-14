@@ -36,6 +36,40 @@ FEATURES = ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
 NUMERIC = ['amount', 'oldbalanceOrg', 'oldbalanceDest']
 CATEGORICAL = ['type']
 REQUIRED = {'step', 'type', 'amount', 'oldbalanceOrg', 'oldbalanceDest', 'isFraud'}
+ENGINEERED_NUMERIC = ['amount_to_origin_balance', 'amount_to_destination_balance',
+                      'origin_balance_after_requested_amount', 'destination_balance_is_zero']
+
+
+def feature_schema(feature_set: str) -> tuple[list[str], list[str], list[str]]:
+    """Return a decision-time feature contract for a named PaySim experiment."""
+    if feature_set == 'pre_transaction_v1':
+        return FEATURES, NUMERIC, CATEGORICAL
+    if feature_set == 'pre_transaction_v2':
+        return FEATURES + ENGINEERED_NUMERIC, NUMERIC + ENGINEERED_NUMERIC, CATEGORICAL
+    raise ValueError('feature_set must be pre_transaction_v1 or pre_transaction_v2')
+
+
+def decision_time_features(rows: pd.DataFrame, feature_set: str) -> pd.DataFrame:
+    """Derive candidate features only from the four API-available input fields.
+
+    No label, post-event balance, participant ID, time step, or cross-row
+    history is read here.  Ratios use one as a lower denominator bound so a
+    zero opening balance is represented without infinity.
+    """
+    features, _, _ = feature_schema(feature_set)
+    missing = set(FEATURES) - set(rows.columns)
+    if missing:
+        raise ValueError(f'Missing decision-time fields: {sorted(missing)}')
+    result = rows[FEATURES].copy()
+    if feature_set == 'pre_transaction_v2':
+        amount = pd.to_numeric(result['amount'], errors='coerce')
+        origin = pd.to_numeric(result['oldbalanceOrg'], errors='coerce')
+        destination = pd.to_numeric(result['oldbalanceDest'], errors='coerce')
+        result['amount_to_origin_balance'] = amount / origin.clip(lower=1.0)
+        result['amount_to_destination_balance'] = amount / destination.clip(lower=1.0)
+        result['origin_balance_after_requested_amount'] = origin - amount
+        result['destination_balance_is_zero'] = np.where(destination.isna(), np.nan, (destination == 0).astype('float32'))
+    return result.loc[:, features]
 
 
 def file_provenance(path: Path) -> dict:
@@ -92,7 +126,8 @@ def type_slice_metrics(rows: pd.DataFrame, scores: np.ndarray, threshold: float)
     return result
 
 
-def robustness_diagnostics(pipeline: Pipeline, rows: pd.DataFrame, scores: np.ndarray, threshold: float) -> dict:
+def robustness_diagnostics(pipeline: Pipeline, rows: pd.DataFrame, scores: np.ndarray, threshold: float,
+                           feature_set: str) -> dict:
     """Exercise serving preprocessing under explicit, non-production perturbations.
 
     These diagnostics are intentionally validation-only and are not a claim
@@ -105,10 +140,10 @@ def robustness_diagnostics(pipeline: Pipeline, rows: pd.DataFrame, scores: np.nd
     missing = features.copy()
     missing_positions = np.arange(len(missing)) % 10 == 0
     missing.loc[missing.index[missing_positions], ['oldbalanceOrg', 'oldbalanceDest']] = np.nan
-    missing_scores = pipeline.predict_proba(missing)[:, 1]
+    missing_scores = pipeline.predict_proba(decision_time_features(missing, feature_set))[:, 1]
     unknown = features.copy()
     unknown['type'] = '__unseen_transaction_type__'
-    unknown_scores = pipeline.predict_proba(unknown)[:, 1]
+    unknown_scores = pipeline.predict_proba(decision_time_features(unknown, feature_set))[:, 1]
     return {
         'scope': 'validation_only_synthetic_preprocessing_stress',
         'warning': 'Perturbations are diagnostic only; they do not model a future fraud distribution or authorize threshold changes.',
@@ -141,7 +176,8 @@ def read_paysim(path: Path, max_rows: int | None) -> pd.DataFrame:
 
 
 def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None,
-          model_version: str = 'paysim-xgboost-v1', mode: str = 'final', positive_weight_multiplier: float = 1.0):
+          model_version: str = 'paysim-xgboost-v1', mode: str = 'final', positive_weight_multiplier: float = 1.0,
+          feature_set: str = 'pre_transaction_v1'):
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError(f'Output already exists; choose a new run path to preserve prior results: {output}')
     if not model_version.startswith('paysim-xgboost-v') or not model_version.removeprefix('paysim-xgboost-v').isdigit():
@@ -152,6 +188,9 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         raise ValueError('positive_weight_multiplier must be a finite positive number')
     if mode == 'final' and positive_weight_multiplier != 1.0:
         raise ValueError('positive weight candidates are validation-only; final mode requires multiplier 1.0')
+    features, numeric, categorical = feature_schema(feature_set)
+    if mode == 'final' and feature_set != 'pre_transaction_v1':
+        raise ValueError('engineered feature candidates are validation-only; final mode requires pre_transaction_v1')
     if not data_path.is_file():
         raise FileNotFoundError(f'Missing {data_path}. Download PaySim manually from Kaggle and keep it outside Git.')
     data = read_paysim(data_path, max_rows)
@@ -163,23 +202,23 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         if part.empty or part['isFraud'].nunique() != 2:
             raise ValueError(f'{label} split must contain both classes. Increase --max-rows or use the full chronology.')
     experiment, started = start_experiment(
-        dataset='PaySim', algorithm='XGBoost', features=FEATURES,
+        dataset='PaySim', algorithm='XGBoost', features=features,
         split_method='chronological step 70/15/15; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_rows': max_rows, 'max_depth': 4,
-                         'learning_rate': .065, 'feature_set': 'pre_transaction_v1',
+                         'learning_rate': .065, 'feature_set': feature_set,
                          'positive_weight_multiplier': positive_weight_multiplier},
     )
     transform = ColumnTransformer([
-        ('numeric', SimpleImputer(strategy='median', add_indicator=True), NUMERIC),
-        ('category', OneHotEncoder(handle_unknown='ignore'), CATEGORICAL),
+        ('numeric', SimpleImputer(strategy='median', add_indicator=True), numeric),
+        ('category', OneHotEncoder(handle_unknown='ignore'), categorical),
     ])
     y_train = train_rows['isFraud'].astype(int)
     positives, negatives = int(y_train.sum()), int(len(y_train) - y_train.sum())
     baseline_transform = ColumnTransformer([
         ('numeric', Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True)),
                               ('scale', StandardScaler(with_mean=False)),
-                              ('clip', FunctionTransformer(np.clip, kw_args={'a_min': -20, 'a_max': 20}))]), NUMERIC),
-        ('category', OneHotEncoder(handle_unknown='ignore'), CATEGORICAL),
+                              ('clip', FunctionTransformer(np.clip, kw_args={'a_min': -20, 'a_max': 20}))]), numeric),
+        ('category', OneHotEncoder(handle_unknown='ignore'), categorical),
     ])
     baseline = Pipeline([('preprocessing', baseline_transform),
                          ('model', LogisticRegression(max_iter=1000, tol=1e-3, class_weight='balanced', solver='liblinear'))])
@@ -189,21 +228,21 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
     pipeline = Pipeline([('preprocessing', transform), ('model', model)])
     with warnings.catch_warnings():
         warnings.filterwarnings('error', category=ConvergenceWarning)
-        baseline.fit(train_rows[FEATURES], y_train)
+        baseline.fit(decision_time_features(train_rows, feature_set), y_train)
     if baseline.named_steps['model'].n_iter_[0] >= 1000:
         raise RuntimeError('PaySim baseline logistic regression did not converge')
-    pipeline.fit(train_rows[FEATURES], y_train)
+    pipeline.fit(decision_time_features(train_rows, feature_set), y_train)
     encoded_features = pipeline.named_steps['preprocessing'].get_feature_names_out()
     importances = pipeline.named_steps['model'].feature_importances_
     ranked = sorted(zip(encoded_features, importances), key=lambda item: item[1], reverse=True)
-    valid_scores = pipeline.predict_proba(valid_rows[FEATURES])[:, 1]
+    valid_scores = pipeline.predict_proba(decision_time_features(valid_rows, feature_set))[:, 1]
     threshold = choose_threshold(valid_rows['isFraud'].astype(int), valid_scores)
     test_metrics = None
     baseline_test_metrics = None
     if mode == 'final':
-        test_scores = pipeline.predict_proba(test_rows[FEATURES])[:, 1]
+        test_scores = pipeline.predict_proba(decision_time_features(test_rows, feature_set))[:, 1]
         test_metrics = evaluate(test_rows['isFraud'].astype(int), test_scores, threshold)
-        baseline_test_metrics = evaluate(test_rows['isFraud'].astype(int), baseline.predict_proba(test_rows[FEATURES])[:, 1], .5)
+        baseline_test_metrics = evaluate(test_rows['isFraud'].astype(int), baseline.predict_proba(decision_time_features(test_rows, feature_set))[:, 1], .5)
     artifact = {
         'format_version': 2, 'model_kind': 'paysim', 'model_version': model_version,
         'run_mode': mode,
@@ -212,10 +251,10 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'library_versions': {'python': sys.version.split()[0], 'pandas': pd.__version__, 'scikit_learn': sklearn.__version__, 'xgboost': xgboost.__version__},
         'split_counts': {'train': len(train_rows), 'validation': len(valid_rows), 'test': len(test_rows)},
         'experiment': finish_experiment(experiment, started),
-        'features': FEATURES, 'numerical_features': NUMERIC, 'categorical_features': CATEGORICAL, 'pipeline': pipeline,
+        'features': features, 'numerical_features': numeric, 'categorical_features': categorical, 'pipeline': pipeline,
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
         'validation_type_slices': type_slice_metrics(valid_rows, valid_scores, threshold),
-        'validation_robustness': robustness_diagnostics(pipeline, valid_rows, valid_scores, threshold),
+        'validation_robustness': robustness_diagnostics(pipeline, valid_rows, valid_scores, threshold, feature_set),
         'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_ranking_metrics': ranking_metrics(valid_rows['isFraud'].astype(int), valid_scores),
         'validation_operating_profiles': operating_profiles(valid_rows['isFraud'].astype(int), valid_scores, threshold),
@@ -223,7 +262,9 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'baseline_test_metrics': baseline_test_metrics,
         'baseline_convergence': {'solver': 'liblinear', 'iterations': int(baseline.named_steps['model'].n_iter_[0]), 'max_iter': 1000, 'converged': True},
         'feature_importance': {'top_30': [{'feature': str(name), 'importance': round(float(value), 6)} for name, value in ranked[:30]],
-                               'leakage_audit': 'Encoded features derive only from type, amount, oldbalanceOrg and oldbalanceDest; importance does not establish causality.'},
+                               'leakage_audit': ('Encoded features derive only from type, amount, oldbalanceOrg and oldbalanceDest; '
+                                                 'engineered ratios and deltas are row-local pre-transaction transformations only; '
+                                                 'importance does not establish causality.')},
         'split_method': '70/15/15 chronological step ascending',
         'excluded_for_leakage': ['isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'],
         'warning': 'PaySim is synthetic; output is an uncalibrated research-model score, not a banking fraud probability.',
@@ -254,11 +295,13 @@ def main():
     parser.add_argument('--model-version', default='paysim-xgboost-v1', help='Version identifier saved with the artifact')
     parser.add_argument('--positive-weight-multiplier', type=float, default=1.0,
                         help='Experiment-only multiplier over inverse-prevalence class weight')
+    parser.add_argument('--feature-set', choices=['pre_transaction_v1', 'pre_transaction_v2'], default='pre_transaction_v1',
+                        help='v2 adds only row-local transformations of API-available pre-transaction fields; experiment only')
     args = parser.parse_args()
     if args.max_rows is not None and args.max_rows < 100:
         parser.error('--max-rows must be at least 100')
     train(args.data, args.output, args.estimators, None if args.full_data else args.max_rows,
-          args.model_version, args.mode, args.positive_weight_multiplier)
+          args.model_version, args.mode, args.positive_weight_multiplier, args.feature_set)
 
 
 if __name__ == '__main__':

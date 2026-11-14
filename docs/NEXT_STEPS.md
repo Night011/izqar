@@ -98,6 +98,20 @@ Kaggle kernel `hoogle57/izqar-ieee-extended-cv-weight-1-25-candidate-v1` зав�
 
 ZIP SHA-256: BAF `c8b4384a671517a1e94889e173907f3f586eadd4156e09b1158de8f0b664b4d3`; PaySim `aa3ed5e80912805f851ebfac83ca60b80088a5f104109c925b376407b0b454d3`. Оба прошли ZIP CRC и импортированы `scripts/import_experiment_report.py` без model payload.
 
+### PaySim pre_transaction_v2 candidate
+
+Следующий controlled experiment меняет только feature set на `pre_transaction_v2`: `amount_to_origin_balance`, `amount_to_destination_balance`, `origin_balance_after_requested_amount` и `destination_balance_is_zero`. Все признаки row-local и вычисляются только из уже доступных до решения `type`, `amount`, `oldbalanceOrg`, `oldbalanceDest`; target, post-event balances, account IDs, step и history исключены. Эта ветка блокирует `--mode final` и не меняет active API schema.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_paysim.py `
+  --data <PS_20174392719_1491204439457_log.csv> `
+  --full-data --mode experiment --feature-set pre_transaction_v2 `
+  --model-version paysim-xgboost-v4 --estimators 180 `
+  --output models\experiments\paysim_pre_transaction_v2_candidate.joblib
+```
+
+Сравнивайте с active v1 и weight candidates на одном validation period: общий Recall/F1/PR-AUC, FP/10k, срезы TRANSFER/CASH_OUT и preprocessing stress. Не использовать final test для выбора.
+
 ### Unified IEEE loss weight 1.25 candidate
 
 Kaggle kernel `hoogle57/izqar-unified-ieee-weight-125-candidate-v3` завершил four-task validation-only run на commit `1525c8cd2155cc59ec1845611d69609892fc4b5c`. Он меняет ровно IEEE loss weight с `1.0` на `1.25`; все четыре task продолжают обновлять shared backbone. ZIP SHA-256 `ea3bc3b6e87266b704814750afa9aea18e9510d6730817dadf6a7d771cb54fff` прошёл CRC, pinned revision и validation-only gates и импортирован без model weights.

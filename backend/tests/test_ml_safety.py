@@ -8,7 +8,7 @@ pytest.importorskip('sklearn', reason='ML dependency not installed')
 pytest.importorskip('xgboost', reason='ML dependency not installed')
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_paysim import FEATURES, read_paysim  # noqa: E402
+from train_paysim import FEATURES, decision_time_features, feature_schema, read_paysim  # noqa: E402
 
 
 def test_incompatible_artifact_is_reported_without_unpickling(tmp_path, client, auth, monkeypatch):
@@ -21,8 +21,13 @@ def test_incompatible_artifact_is_reported_without_unpickling(tmp_path, client, 
     }), encoding='utf-8')
     with monkeypatch.context() as patch:
         patch.setattr(ml, 'PAYSIM_MODEL_PATH', model)
+        # This test replaces joblib.load globally. Keep the separately installed
+        # Unified artifact out of the status endpoint so the assertion remains
+        # scoped to PaySim's pre-unpickle compatibility gate.
+        patch.setattr(ml, 'UNIFIED_MODEL_PATH', tmp_path / 'missing_unified.metrics.json')
         patch.setattr(ml.joblib, 'load', lambda *_: pytest.fail('must reject before unpickling'))
         ml.load_paysim_model.cache_clear()
+        ml.load_unified_model.cache_clear()
         status = client.get('/api/v1/model/status', headers=auth)
         assert status.status_code == 200
         assert 'requires scikit-learn' in status.json()['artifact_errors']['paysim']
@@ -31,12 +36,27 @@ def test_incompatible_artifact_is_reported_without_unpickling(tmp_path, client, 
         }}, headers=auth)
         assert response.status_code == 503
     ml.load_paysim_model.cache_clear()
+    ml.load_unified_model.cache_clear()
 
 
 def test_paysim_feature_contract_excludes_post_event_and_identity_fields():
     forbidden = {'isFraud', 'isFlaggedFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'}
     assert not forbidden.intersection(FEATURES)
     assert FEATURES == ['type', 'amount', 'oldbalanceOrg', 'oldbalanceDest']
+
+
+def test_paysim_v2_features_are_row_local_and_pre_transaction_only():
+    rows = pd.DataFrame({'type': ['TRANSFER', 'CASH_OUT'], 'amount': [50., 8.],
+                         'oldbalanceOrg': [100., 0.], 'oldbalanceDest': [0., 20.],
+                         'isFraud': [1, 0], 'newbalanceOrig': [50., 0.]})
+    all_features, numeric, categorical = feature_schema('pre_transaction_v2')
+    result = decision_time_features(rows, 'pre_transaction_v2')
+    assert list(result) == all_features
+    assert not {'isFraud', 'newbalanceOrig', 'newbalanceDest', 'nameOrig', 'nameDest', 'step'}.intersection(result)
+    assert result.loc[0, 'amount_to_origin_balance'] == 0.5
+    assert result.loc[1, 'amount_to_origin_balance'] == 8.0
+    assert result.loc[0, 'destination_balance_is_zero'] == 1.0
+    assert 'amount_to_origin_balance' in numeric and categorical == ['type']
 
 
 def test_paysim_loader_retains_original_label_only_for_training(tmp_path):
