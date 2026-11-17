@@ -144,8 +144,18 @@ def export_shadow_bundle(pipeline, report: dict, destination_zip: Path) -> dict:
     if destination_zip.exists():
         raise FileExistsError('The shadow ZIP already exists; do not overwrite candidates')
     names = _names(destination_zip.stem)
-    if tuple(pipeline.feature_names_in_) != EXPECTED_FEATURES:
+    fitted_columns = tuple(pipeline.feature_names_in_)
+    if len(fitted_columns) != len(EXPECTED_FEATURES) or set(fitted_columns) != set(EXPECTED_FEATURES):
         raise ValueError('Fitted pipeline feature names differ from reviewed causal schema')
+    # make_features() appends history AFTER categorical fields. ColumnTransformer
+    # selects columns by their names, so the original DataFrame order is not a
+    # semantic model-schema mismatch. Keep the exact reviewed selectors pinned.
+    preprocessing = pipeline.named_steps['preprocessing']
+    selectors = {name: tuple(columns)
+                 for name, _transformer, columns in preprocessing.transformers_
+                 if name in {'numeric', 'categorical'}}
+    if selectors != {'numeric': BASE_NUMERIC + HISTORY_NUMERIC, 'categorical': CATEGORICAL}:
+        raise ValueError('Fitted preprocessing column selectors differ from reviewed causal schema')
     from sklearn.pipeline import Pipeline
     if not isinstance(pipeline, Pipeline) or set(pipeline.named_steps) != {'preprocessing', 'model'}:
         raise ValueError('Expected a fitted preprocessing + XGBoost pipeline')

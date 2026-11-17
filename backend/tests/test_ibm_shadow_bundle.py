@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import ibm_shadow_bundle as shadow  # noqa: E402
 
 
-def fitted_candidate():
+def fitted_candidate(*, legacy_column_order: bool = False):
     rng = np.random.default_rng(42)
     frame = pd.DataFrame({
         col: rng.uniform(0, 200, size=48).astype('float32')
@@ -38,7 +38,9 @@ def fitted_candidate():
     model = XGBClassifier(n_estimators=8, max_depth=2, random_state=42, n_jobs=1,
                           objective='binary:logistic', tree_method='hist')
     pipeline = Pipeline([('preprocessing', pre), ('model', model)])
-    pipeline.fit(frame[list(shadow.EXPECTED_FEATURES)], labels)
+    fitted_order = (list(shadow.BASE_NUMERIC + shadow.CATEGORICAL + shadow.HISTORY_NUMERIC)
+                    if legacy_column_order else list(shadow.EXPECTED_FEATURES))
+    pipeline.fit(frame[fitted_order], labels)
     report = {
         'format_version': 2, 'model_kind': 'ibm_aml', 'model_version': 'ibm-aml-causal-shadow-test',
         'run_mode': 'experiment', 'experiment': {'mode': 'experiment', 'experiment_id': 'fixture',
@@ -53,6 +55,27 @@ def fitted_candidate():
         'test_metrics': None, 'baseline_test_metrics': None,
     }
     return pipeline, report
+
+
+def test_ibm_shadow_export_accepts_training_dataframe_order(tmp_path):
+    # The real causal feature builder appends history after categorical values.
+    # All expected features exist, but the Pipeline's input column order differs.
+    pipeline, report = fitted_candidate(legacy_column_order=True)
+    assert tuple(pipeline.feature_names_in_) != shadow.EXPECTED_FEATURES
+    assert set(pipeline.feature_names_in_) == set(shadow.EXPECTED_FEATURES)
+    bundle = tmp_path / 'bank_v2_noncanonical_source_order.zip'
+    exported = shadow.export_shadow_bundle(pipeline, report, bundle)
+    assert exported['synthetic_smoke_max_delta'] <= 1e-6
+    assert shadow.verify_shadow_bundle(bundle, exported['sha256'])['stem'] == bundle.stem
+
+
+def test_ibm_shadow_export_still_requires_reviewed_preprocessor_selectors(tmp_path):
+    pipeline, report = fitted_candidate()
+    pre = pipeline.named_steps['preprocessing']
+    name, transformer, columns = pre.transformers_[0]
+    pre.transformers_[0] = (name, transformer, list(columns)[1:])
+    with pytest.raises(ValueError, match='column selectors'):
+        shadow.export_shadow_bundle(pipeline, report, tmp_path / 'reject_wrong_selectors.zip')
 
 
 def test_ibm_shadow_bundle_roundtrip_and_registry_candidate(tmp_path):
