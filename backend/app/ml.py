@@ -181,6 +181,15 @@ def _load_artifact(path: Path, expected_kind: str):
             raise RuntimeError(f'Invalid {expected_kind} model metadata') from exc
         if report.get('model_kind') != expected_kind:
             raise RuntimeError(f'Incorrect {expected_kind} model kind in metadata')
+        # Never unpickle or serve validation-only candidate weights, even if
+        # an operator accidentally points a serving path at experiments.
+        experiment = report.get('experiment')
+        if (report.get('deployment_role') == 'offline_shadow_only' or
+                report.get('serving_allowed') is False or
+                report.get('run_mode') == 'experiment' or
+                (isinstance(experiment, dict) and experiment.get('mode') == 'experiment') or
+                'experiments' in report_path.resolve().parts):
+            raise RuntimeError(f'{expected_kind} experiment-only candidate cannot serve API traffic')
         trained_version = report.get('library_versions', {}).get('scikit_learn')
         legacy_paysim_v5 = _is_reviewed_paysim_v5_legacy(report, expected_kind, portable)
         if trained_version and trained_version != sklearn.__version__ and not legacy_paysim_v5:

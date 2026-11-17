@@ -151,14 +151,16 @@ def make_features(chunk: pd.DataFrame, times: pd.Series, history_features: pd.Da
 def load_splits(path: Path, train_cut: pd.Timestamp, valid_cut: pd.Timestamp,
                 train_available: int, max_train_rows: int | None, include_test: bool,
                 feature_set: str = 'static_v1', history_max_accounts: int = 500_000):
-    if feature_set not in {'static_v1', 'causal_history_v1'}:
-        raise ValueError('feature_set must be static_v1 or causal_history_v1')
+    if feature_set not in {'static_v1', 'causal_history_v1', 'causal_history_bank_v2'}:
+        raise ValueError('feature_set must be static_v1, causal_history_v1 or causal_history_bank_v2')
     parts: dict[str, list[pd.DataFrame]] = {key: [] for key in ('train', 'validation', 'test')}
     labels: dict[str, list[np.ndarray]] = {key: [] for key in parts}
     counts = {key: 0 for key in parts}
     train_seen = 0
-    history_stream = (CausalHistoryStream(CausalAccountHistory(history_max_accounts))
-                      if feature_set == 'causal_history_v1' else None)
+    history_stream = (CausalHistoryStream(CausalAccountHistory(history_max_accounts),
+                        identity_mode=('bank_account_v2' if feature_set == 'causal_history_bank_v2'
+                                       else 'account_only_v1'))
+                       if feature_set != 'static_v1' else None)
 
     def consume(chunk: pd.DataFrame, history_features: pd.DataFrame | None = None):
         nonlocal train_seen
@@ -220,17 +222,22 @@ def precision_at_k(y: np.ndarray, scores: np.ndarray, k: int = 1000) -> float:
 def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators: int = 180,
           max_train_rows: int | None = 500_000, max_false_alerts_per_10000: float | None = 100,
           feature_set: str = 'static_v1', history_max_accounts: int = 500_000,
-          early_stopping_rounds: int | None = None):
+          early_stopping_rounds: int | None = None, shadow_bundle: Path | None = None):
     if mode not in {'experiment', 'final'} or n_estimators < 1:
         raise ValueError('Use experiment/final mode and positive estimators')
     if max_train_rows is not None and max_train_rows < 100:
         raise ValueError('max_train_rows must be at least 100')
-    if feature_set not in {'static_v1', 'causal_history_v1'}:
-        raise ValueError('feature_set must be static_v1 or causal_history_v1')
+    if feature_set not in {'static_v1', 'causal_history_v1', 'causal_history_bank_v2'}:
+        raise ValueError('feature_set must be static_v1, causal_history_v1 or causal_history_bank_v2')
     if feature_set != 'static_v1' and mode == 'final':
         raise ValueError('causal history is a validation-only candidate; final mode is deliberately blocked')
     if early_stopping_rounds is not None and early_stopping_rounds < 1:
         raise ValueError('early_stopping_rounds must be positive when supplied')
+    if shadow_bundle is not None:
+        if mode != 'experiment' or feature_set not in {'causal_history_v1', 'causal_history_bank_v2'}:
+            raise ValueError('Shadow export is allowed only for causal history experiments')
+        if shadow_bundle.suffix != '.zip' or shadow_bundle.exists():
+            raise ValueError('Shadow export requires a new, non-existing .zip path')
     if output.exists() or output.with_suffix('.metrics.json').exists():
         raise FileExistsError('Output exists; preserve prior IBM AML experiments')
     validate_file(data_path)
@@ -239,7 +246,7 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
                                 max_train_rows, mode == 'final', feature_set, history_max_accounts)
     x_train, y_train = split['train']
     x_valid, y_valid = split['validation']
-    numeric_features = NUMERIC + (HISTORY_FEATURES if feature_set == 'causal_history_v1' else [])
+    numeric_features = NUMERIC + (HISTORY_FEATURES if feature_set != 'static_v1' else [])
     features = numeric_features + CATEGORICAL
     experiment, started = start_experiment(
         dataset='IBM AML HI-Small', algorithm='XGBoost', features=features,
@@ -277,7 +284,9 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
     names = pre.get_feature_names_out()
     importance = sorted(zip(names, model.feature_importances_), key=lambda pair: float(pair[1]), reverse=True)
     report = {
-        'format_version': 2, 'model_kind': 'ibm_aml', 'model_version': 'ibm-aml-hi-small-xgboost-v1', 'run_mode': mode,
+        'format_version': 2, 'model_kind': 'ibm_aml',
+        'model_version': ('ibm-aml-causal-bank-shadow-v2' if feature_set == 'causal_history_bank_v2'
+                          else 'ibm-aml-hi-small-xgboost-v1'), 'run_mode': mode,
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'IBM AML HI-Small synthetic laundering transactions',
         'data_files': [file_provenance(data_path)],
@@ -331,8 +340,16 @@ def train(data_path: Path, output: Path, mode: str = 'experiment', n_estimators:
         artifact['pipeline'] = pipeline
         output.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(artifact, output)
+    shadow_details = None
+    if shadow_bundle is not None:
+        from ibm_shadow_bundle import export_shadow_bundle
+        # This uses the fitted pipeline and a synthetic contract row only.
+        # It never creates a serving model or evaluates sealed test data.
+        shadow_details = export_shadow_bundle(pipeline, report, shadow_bundle)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.with_suffix('.metrics.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    if shadow_details is not None:
+        print(json.dumps({'offline_shadow_export': shadow_details}, indent=2))
     print(json.dumps({'mode': mode, 'validation': validation_metrics,
                       'test': report['test_metrics'], 'output': str(output)}, indent=2))
     return report
@@ -347,14 +364,16 @@ def main() -> None:
     parser.add_argument('--max-train-rows', type=int, default=500_000)
     parser.add_argument('--full-train', action='store_true', help='Explicitly fit all early-period rows')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100)
-    parser.add_argument('--feature-set', choices=['static_v1', 'causal_history_v1'], default='static_v1')
+    parser.add_argument('--feature-set', choices=['static_v1', 'causal_history_v1', 'causal_history_bank_v2'], default='static_v1')
     parser.add_argument('--history-max-accounts', type=int, default=500_000)
     parser.add_argument('--early-stopping-rounds', type=int,
                         help='Stop after this many non-improving validation PR-AUC rounds')
+    parser.add_argument('--shadow-bundle', type=Path,
+                        help='Export fitted causal history (v1 or bank v2) as offline-only ZIP')
     args = parser.parse_args()
     train(args.data, args.output, args.mode, args.estimators,
           None if args.full_train else args.max_train_rows, args.max_false_alerts_per_10000,
-          args.feature_set, args.history_max_accounts, args.early_stopping_rounds)
+          args.feature_set, args.history_max_accounts, args.early_stopping_rounds, args.shadow_bundle)
 
 
 if __name__ == '__main__':

@@ -68,6 +68,18 @@ Unified experiment также может использовать `--early-stopp
 
 `scripts/ibm_history_features.py` реализует prior outgoing/incoming counts, amounts и time-since-activity. Его `CausalHistoryStream` удерживает последнюю timestamp-группу между CSV chunks, поэтому одинаковое время не даёт операциям увидеть друг друга. Account остаётся только ключом истории. `train_ibm_aml.py --feature-set causal_history_v1` подключает эти признаки **только** к experiment candidate и блокирует `--mode final`; активный IBM артефакт не изменяется.
 
+## IBM AML: offline shadow export
+
+Для `causal_history_v1` после нового validation-only обучения доступен `--shadow-bundle`.
+ZIP содержит проверяемый XGBoost/preprocessing экспорт, но **не final test** и **не serving-модель**.
+Протокол SHA-256, безопасной offline-установки и schema-smoke: [IBM_SHADOW_WORKFLOW.md](IBM_SHADOW_WORKFLOW.md).
+
+## IBM AML bank-scoped candidate
+
+Новый validation-only `causal_history_bank_v2` использует составные ключи (банк, счёт).
+`causal_history_v1` не меняется; старые метрики не перезаписываются.
+Для достоверного вывода нужна новая Kaggle validation-оценка на том же периоде.
+
 ## Интерпретация результатов
 
 - **Monitoring** подходит для исследования покрытия; он не означает автоматическую блокировку.

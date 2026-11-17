@@ -116,22 +116,22 @@ def _lifecycle(report_path: Path, report_root: Path, active_kind: str | None) ->
     the serving set.  A final report outside that directory remains an archived
     report until an operator explicitly configures it as an active model path.
     """
-    if active_kind is not None:
-        return 'active'
     try:
         report = json.loads(report_path.read_text(encoding='utf-8'))
         mode = report.get('run_mode')
         if not isinstance(mode, str):
             experiment = report.get('experiment')
             mode = experiment.get('mode') if isinstance(experiment, dict) else None
-        relative_parts = report_path.resolve().relative_to(report_root.resolve()).parts
-        if mode == 'experiment' or 'experiments' in relative_parts:
+        relative_parts = report_path.resolve().parts
+        if (mode == 'experiment' or 'experiments' in relative_parts or
+                report.get('deployment_role') == 'offline_shadow_only' or
+                report.get('serving_allowed') is False):
             return 'candidate'
     except (OSError, ValueError, TypeError):
         # _entry will expose the metadata error.  Treat unknown archive intent
         # conservatively: it must never become a serving model.
         pass
-    return 'archived'
+    return 'active' if active_kind is not None else 'archived'
 
 
 def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
@@ -141,7 +141,12 @@ def list_registry(active_paths: dict[str, Path], model_root: Path) -> dict:
     for kind, path in active_paths.items():
         report_path = _report_path(path)
         seen.add(report_path.resolve())
-        entries.append(_entry(report_path, kind, _lifecycle(report_path, model_root, kind), model_root))
+        lifecycle = _lifecycle(report_path, model_root, kind)
+        entry = _entry(report_path, kind if lifecycle == 'active' else None, lifecycle, model_root)
+        if lifecycle == 'candidate':
+            entry['configured_for'] = kind
+            entry['error'] = 'Configured active path points to offline experiment; it is NOT serving'
+        entries.append(entry)
     if model_root.is_dir():
         root = model_root.resolve()
         for report_path in sorted(model_root.rglob('*.metrics.json')):
