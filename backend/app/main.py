@@ -274,6 +274,18 @@ def ibm_aml_graph_report():
     """Expose only aggregate signals from the optional offline IBM analysis."""
     return read_public_summary(IBM_AML_GRAPH_REPORT_PATH)
 
+@app.get('/api/v1/model/baf-candidate', dependencies=[Depends(require_key)])
+def baf_candidate():
+    from .ml import load_baf_candidate_metrics
+    metrics = load_baf_candidate_metrics()
+    if metrics is None:
+        raise HTTPException(status_code=404, detail='BAF экспериментальные метрики не найдены; обучите через backend/scripts/train_baf.py --mode research')
+    return {'model_version': metrics.get('model_version', 'baf-research-folds'), 'experimental': True,
+            'folds': metrics.get('folds', []),
+            'mean_metrics': metrics.get('mean_metrics', {}),
+            'split_method': metrics.get('split_method'),
+            'warning': 'Research metrics on internal month folds; the final test month was never used for tuning.'}
+
 @app.get('/api/v1/model/ieee-candidate', dependencies=[Depends(require_key)])
 def ieee_candidate():
     from .ml import load_ieee_candidate_metrics

@@ -297,6 +297,33 @@ def load_unified_model():
         raise RuntimeError(f'Unable to load unified model artifact ({type(exc).__name__})') from exc
 
 
+def load_baf_candidate_metrics():
+    """Return BAF experimental candidate metrics if a metrics file exists, else None.
+
+    Reads (in order) IZQAR_BAF_CANDIDATE_METRICS, then the default experiment locations.
+    Never loads the model itself; purely informational for ML Analytics.
+    """
+    import json
+    import os
+
+    from .config import BACKEND_ROOT
+    candidates = [
+        os.environ.get('IZQAR_BAF_CANDIDATE_METRICS'),
+        BACKEND_ROOT / 'models' / 'experiments' / 'baf_research_v1.metrics.json',
+        BACKEND_ROOT.parent / 'models' / 'experiments' / 'baf_research_v1.metrics.json',
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.is_file():
+            try:
+                return json.loads(path.read_text(encoding='utf-8'))
+            except (ValueError, OSError):
+                return None
+    return None
+
+
 def load_ieee_candidate_metrics():
     """Return IEEE-CIS experimental candidate metrics if a metrics file exists, else None.
 
