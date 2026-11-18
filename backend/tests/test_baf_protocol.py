@@ -59,7 +59,7 @@ def test_threshold_comes_from_calibration_and_is_frozen_on_external():
     assert external['threshold'] == round(float(threshold), 6)
     assert external['threshold_source'] == 'frozen from calibration month'
     assert external['confusion_matrix_tn_fp_fn_tp'][1] == expected_fp
-    assert set(external['post_hoc_budget_diagnostics']) == {'50', '75', '100'}
+    assert set(external['post_hoc_budget_diagnostics']) == {'50', '100', '200', '500'}
 
 
 def test_capacity_policy_replays_alert_rate_without_labels():

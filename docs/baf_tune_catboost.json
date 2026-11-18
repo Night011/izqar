@@ -1,0 +1,109 @@
+{
+ "mode": "baf-hyperparameter-search",
+ "trained_at_utc": "2026-11-18T19:27:00.600076+00:00",
+ "algo": "catboost_native",
+ "feature_set": "v1v",
+ "seed": 42,
+ "search_data": "fit months [0, 1] -> PR-AUC on calibration month 2 (never an external fold)",
+ "rounds": 400,
+ "trials": 8,
+ "best_value": 0.136029,
+ "best_params": {
+  "depth": 3,
+  "learning_rate": 0.11370159575730848,
+  "l2_leaf_reg": 16.967533607196547,
+  "random_strength": 0.6370173320348285,
+  "bagging_temperature": 0.18182496720710062
+ },
+ "history": [
+  {
+   "number": 0,
+   "value": 0.13058,
+   "params": {
+    "depth": 5,
+    "learning_rate": 0.10985745201142037,
+    "l2_leaf_reg": 12.057126287443763,
+    "random_strength": 1.7959754525911098,
+    "bagging_temperature": 0.15601864044243652
+   }
+  },
+  {
+   "number": 1,
+   "value": 0.12698,
+   "params": {
+    "depth": 3,
+    "learning_rate": 0.02219360392019892,
+    "l2_leaf_reg": 19.030368381735816,
+    "random_strength": 1.8033450352296265,
+    "bagging_temperature": 0.7080725777960455
+   }
+  },
+  {
+   "number": 2,
+   "value": 0.136029,
+   "params": {
+    "depth": 3,
+    "learning_rate": 0.11370159575730848,
+    "l2_leaf_reg": 16.967533607196547,
+    "random_strength": 0.6370173320348285,
+    "bagging_temperature": 0.18182496720710062
+   }
+  },
+  {
+   "number": 3,
+   "value": 0.133604,
+   "params": {
+    "depth": 4,
+    "learning_rate": 0.034496614656217915,
+    "l2_leaf_reg": 5.958389350068956,
+    "random_strength": 1.2958350559263474,
+    "bagging_temperature": 0.2912291401980419
+   }
+  },
+  {
+   "number": 4,
+   "value": 0.134442,
+   "params": {
+    "depth": 6,
+    "learning_rate": 0.02567895331620816,
+    "l2_leaf_reg": 2.701052774960547,
+    "random_strength": 1.099085529881075,
+    "bagging_temperature": 0.45606998421703593
+   }
+  },
+  {
+   "number": 5,
+   "value": 0.130335,
+   "params": {
+    "depth": 7,
+    "learning_rate": 0.028602658369616396,
+    "l2_leaf_reg": 5.748924681991978,
+    "random_strength": 1.7772437065861273,
+    "bagging_temperature": 0.046450412719997725
+   }
+  },
+  {
+   "number": 6,
+   "value": 0.131434,
+   "params": {
+    "depth": 6,
+    "learning_rate": 0.027147107064325292,
+    "l2_leaf_reg": 1.2476394272569447,
+    "random_strength": 2.84665661176,
+    "bagging_temperature": 0.9656320330745594
+   }
+  },
+  {
+   "number": 7,
+   "value": 0.131318,
+   "params": {
+    "depth": 7,
+    "learning_rate": 0.03451958620131221,
+    "l2_leaf_reg": 1.3940346079873225,
+    "random_strength": 2.052699079536471,
+    "bagging_temperature": 0.4401524937396013
+   }
+  }
+ ],
+ "baseline_value": 0.134322
+}

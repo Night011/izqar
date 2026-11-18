@@ -161,8 +161,87 @@ Same-month is **worse** than cross-month on every month, by 0.014–0.030, despi
 
 The curve is steep up to ~200k rows and then flattens (+0.004 for the second doubling). The full-history models (260k–600k rows) therefore sit within ~0.004 of the practical plateau, and m3's weakness is a volume effect (two months of history) rather than a drift or tuning defect. Practical consequence: further tuning on this dataset has little room; the two levers that did move the number are the seven velocity columns (+0.018 PR-AUC, available once the streaming counters exist) and, marginally, the pre-deployment refit.
 
+## Stage 11 — official benchmark reproduction (`research_baf_official.py`)
+
+Feedzai's `notebooks/empirical_results.ipynb`: months 0–5 train, 6–7 test, **every column except `fraud_bool`**, LabelEncoder cats (we use pandas category dtype so unseen levels do not raise), LightGBM sampled from `lightgbm_hyperparameter_space.yaml`, operating point at FPR<5% (≈500 FP/10k) chosen on the test labels. 12 trials instead of 100, `n_estimators` capped at 600.
+
+| Variant (identical folds, months 6–7) | PR-AUC | recall@5%FPR | recall@100 FP/10k |
+|---|---|---|---|
+| official (all columns) | 0.1968 | 0.553 | 0.258 |
+| minus `month` | 0.1958 | — | 0.259 |
+| admissible (v1+velocity, no `month`/`days_since_request`/`device_fraud_count`/`credit_risk_score`) | 0.1892 | — | 0.242 |
+
+Ablation evidence per excluded column (data audit over 1M rows + datasheet):
+
+| Column | Evidence | Decision |
+|---|---|---|
+| `device_fraud_count` | **constant 0 in Base** (nunique=1); by definition "number of fraudulent applications with used device", i.e. label-derived | correctly excluded, and it carries no information here |
+| `days_since_request` | datasheet: days since the application was made (0–79), median 0.015 — post-application | excluded, not known at decision time |
+| `month` | time index; the model would read the fraud-rate trend | excluded (measured cost: −0.0010 PR-AUC) |
+| `credit_risk_score` | datasheet: the *bank's* internal application risk score, −191…389, 1.4% negative | excluded on availability (IZQAR is not the issuing bank), not on leakage; measured cost −0.0066 |
+
+The research contract loses 0.0076 PR-AUC in total, and none of it is a leak we could legitimately re-add.
+
+## Stage 12 — tuning, encodings, preprocessing, ensembles
+
+Search: Optuna TPE, objective = PR-AUC on month 2 with the model fitted on months 0–1 (month 2 is never an external fold). 30 LightGBM trials, 8 CatBoost native trials. Best config frozen, then evaluated unchanged on the folds.
+
+| arm (v1v = v1 + 7 velocity columns) | mean PR-AUC | recall@capacity m3/4/5 | FP/10k |
+|---|---|---|---|
+| xgboost v1 (old baseline) | 0.1529 | 0.229/0.231/0.260 | 98/96/96 |
+| catboost v1 | 0.1558 | 0.237/0.227/0.259 | 98/96/96 |
+| xgboost v1v | 0.1708 | 0.251/0.253/0.279 | 97/94/95 |
+| lightgbm v1v tuned (OHE) | 0.1712 | 0.264/0.242/0.272 | 97/97/96 |
+| lightgbm v1v tuned, native cats + raw NaN | 0.1710 | 0.261/0.247/0.271 | 98/95/96 |
+| lightgbm v1v tuned, balcon negatives = missing | 0.1712 | 0.256/0.247/0.266 | 97/96/97 |
+| catboost v1v (Run B config) | 0.1732 | 0.254/0.247/0.279 | 98/95/97 |
+| **catboost native v1v tuned** | **0.1739** | 0.255/0.249/0.282 | 97/95/96 |
+| v1x velocity ratios (xgb / lgbm) | 0.1696 / 0.1691 | 0.253/0.240/0.279 | 97/96/96 |
+| ensemble xgb+cat_native | 0.1750 | 0.257/0.249/0.281 | 98/94/96 |
+| ensemble lgbm_native+cat_native | 0.1755 | 0.260/0.249/0.275 | 98/94/96 |
+| **ensemble xgb+lgbm_native+cat_native** | **0.1759** | 0.262/0.258/0.281 | 97/95/96 |
+
+Findings:
+
+1. **Hyperparameter search does not transfer.** LightGBM lifted its selection month 0.1322→0.1387 (+0.0066) and CatBoost 0.1343→0.1360 (+0.0017), but on the folds tuned LightGBM is 0.1712 vs 0.1708 for untuned XGBoost, and tuned CatBoost 0.1739 vs 0.1732 for its untuned twin. That selection gain was month-2 noise.
+2. **Encoding and missing-value handling are not the bottleneck.** Native categoricals with raw NaN (the published LightGBM recipe) score 0.1710 vs 0.1712 for one-hot + median imputation; masking `intended_balcon_amount` negatives and `device_distinct_emails_8w` = −1 as missing changes nothing (+0.0002). Both are still the *correct* reading of the datasheet and are now the default in the research harness.
+3. **Velocity ratio interactions do not help** (−0.002 on both libraries). The absolute counts already carry the signal.
+4. **Only the ensemble moves the mean**, 0.1739 → 0.1759 (+0.0020, driven by m4/m5 and slightly negative on m3), computed from out-of-fold external scores only, with no weight fitted anywhere.
+
+Trade-off at the same folds (post-hoc, threshold-free view; working budget stays 100):
+
+| arm | recall@50 | @100 | @200 | @500 |
+|---|---|---|---|---|
+| xgboost v1 | 0.172 | 0.244 | 0.318 | 0.494 |
+| xgboost v1v | 0.184 | 0.266 | 0.353 | 0.529 |
+| catboost native v1v tuned | 0.180 | 0.267 | 0.372 | 0.554 |
+| ensemble xgb+lgbm+cat | 0.182 | 0.271 | 0.377 | 0.559 |
+
+The capacity policy holds the budget at 94–98 FP/10k on every fold and every arm while landing 0.001–0.007 recall below the oracle threshold at the same budget.
+
+## Where the remaining error can come from
+
+Five algorithm/encoding variants sit in 0.171–0.174, tuning does not transfer, interactions hurt, the learning curve is flat above ~400k rows, and the only thing that ever moved the number was seven new aggregate columns (+0.018). The limit is **feature coverage**, not model capacity, not tuning, not drift.
+
+| # | Missing information | Evidence it should transfer | IZQAR feasibility |
+|---|---|---|---|
+| 1 | Trailing counts of *prior confirmed frauds* per device/email/phone/address (6h/24h/4w/8w) | `device_fraud_count` is exactly this signal in BAF and is constant 0 here, so Base cannot price it; in production it is the strongest account-opening predictor | high — the review/investigation workflow already produces confirmed outcomes; needs a label-lag-aware rolling counter |
+| 2 | Wider entity keys and cross-entity ratios (IP, phone, employer; distinct accounts per device × distinct devices per email) | BAF's four entity keys are already its strongest aggregate columns; the same construction over more keys is the natural extension | high — event store plus precomputed counters at application time |
+| 3 | KYC / device-intelligence vendor outputs (document liveness, IP reputation, emulator flags) | absent from BAF, so no fold can price it | medium — integration and contract work |
+| 4 | Post-application outcomes (chargebacks) | unavailable at decision time; usable only to enrich labels | low for scoring |
+
+Adoption rule for any step: offline replay of a historical application stream, then a rerun of the same three folds, requiring ≥+0.01 mean PR-AUC with FP/10k ≤100 on **every** fold. Anything smaller is inside fold noise and does not justify a production change.
+
+
+
+
+
+
+
+
 ## Log
 
+- 2026-11-19: official Feedzai benchmark reproduced on months 6–7 (PR-AUC 0.1968, recall@5%FPR 0.553); the admissible contract costs −0.0076 PR-AUC. 30+8 Optuna trials on month 2 do not transfer to the folds. Native vs one-hot categoricals, raw NaN vs imputation, balcon/device_email sentinels, and velocity ratio interactions are all inside noise. Best measured: catboost native v1v 0.1739, 3-model rank ensemble 0.1759 (+0.0027 vs 0.1732), recall@100 0.271.
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
 - Research folds (train region only, expanding: valid months 3/4/5; threshold from fold valid, FP/10k budget 100; 400 trees, early stop 40):
 

@@ -1,0 +1,459 @@
+{
+ "mode": "official-benchmark-reproduction",
+ "protocol": "months 0-5 train, 6-7 test (historical; not independent)",
+ "trained_at_utc": "2026-11-18T18:57:23.453235+00:00",
+ "deviations": [
+  "12 random trials instead of 100",
+  "n_estimators capped at 600",
+  "pandas category dtype instead of LabelEncoder"
+ ],
+ "class_weight": "none, as in the published notebook",
+ "trials": [
+  {
+   "params": {
+    "n_estimators": 278,
+    "max_depth": 9,
+    "learning_rate": 0.07964603998331024,
+    "num_leaves": 49,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 7,
+    "max_bin": 311,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.116031,
+    "roc_auc": 0.875664,
+    "official_operating_point": {
+     "threshold": 0.046412,
+     "recall": 0.495483,
+     "false_alerts_per_10000": 499.918,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.085823,
+    "threshold_at_50_fp_10k": 0.398293,
+    "recall_at_100_fp_10k": 0.171994,
+    "threshold_at_100_fp_10k": 0.22908,
+    "recall_at_200_fp_10k": 0.284573,
+    "threshold_at_200_fp_10k": 0.121875,
+    "recall_at_500_fp_10k": 0.495483,
+    "threshold_at_500_fp_10k": 0.04641
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 266,
+    "max_depth": 10,
+    "learning_rate": 0.024579756829881016,
+    "num_leaves": 28,
+    "boosting_type": "goss",
+    "min_data_in_leaf": 19,
+    "max_bin": 173,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.194894,
+    "roc_auc": 0.893485,
+    "official_operating_point": {
+     "threshold": 0.041911,
+     "recall": 0.548645,
+     "false_alerts_per_10000": 496.851,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.172689,
+    "threshold_at_50_fp_10k": 0.209732,
+    "recall_at_100_fp_10k": 0.256081,
+    "threshold_at_100_fp_10k": 0.141354,
+    "recall_at_200_fp_10k": 0.367964,
+    "threshold_at_200_fp_10k": 0.088704,
+    "recall_at_500_fp_10k": 0.548645,
+    "threshold_at_500_fp_10k": 0.041715
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 178,
+    "max_depth": 7,
+    "learning_rate": 0.04082848077364031,
+    "num_leaves": 16,
+    "boosting_type": "goss",
+    "min_data_in_leaf": 38,
+    "max_bin": 456,
+    "enable_bundle": false
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.19358,
+    "roc_auc": 0.893658,
+    "official_operating_point": {
+     "threshold": 0.04194,
+     "recall": 0.54795,
+     "false_alerts_per_10000": 499.077,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.173037,
+    "threshold_at_50_fp_10k": 0.20598,
+    "recall_at_100_fp_10k": 0.250869,
+    "threshold_at_100_fp_10k": 0.139775,
+    "recall_at_200_fp_10k": 0.369701,
+    "threshold_at_200_fp_10k": 0.086523,
+    "recall_at_500_fp_10k": 0.54795,
+    "threshold_at_500_fp_10k": 0.041896
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 333,
+    "max_depth": 5,
+    "learning_rate": 0.06775020078684452,
+    "num_leaves": 22,
+    "boosting_type": "goss",
+    "min_data_in_leaf": 179,
+    "max_bin": 278,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.19667,
+    "roc_auc": 0.8948,
+    "official_operating_point": {
+     "threshold": 0.049753,
+     "recall": 0.54795,
+     "false_alerts_per_10000": 497.346,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.175122,
+    "threshold_at_50_fp_10k": 0.246643,
+    "recall_at_100_fp_10k": 0.253301,
+    "threshold_at_100_fp_10k": 0.169713,
+    "recall_at_200_fp_10k": 0.363447,
+    "threshold_at_200_fp_10k": 0.10639,
+    "recall_at_500_fp_10k": 0.54795,
+    "threshold_at_500_fp_10k": 0.049534
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 282,
+    "max_depth": 10,
+    "learning_rate": 0.0423890787107126,
+    "num_leaves": 11,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 8,
+    "max_bin": 398,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.191027,
+    "roc_auc": 0.895189,
+    "official_operating_point": {
+     "threshold": 0.044092,
+     "recall": 0.552467,
+     "false_alerts_per_10000": 499.424,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.1713,
+    "threshold_at_50_fp_10k": 0.227396,
+    "recall_at_100_fp_10k": 0.244962,
+    "threshold_at_100_fp_10k": 0.15367,
+    "recall_at_200_fp_10k": 0.366574,
+    "threshold_at_200_fp_10k": 0.093095,
+    "recall_at_500_fp_10k": 0.552467,
+    "threshold_at_500_fp_10k": 0.044056
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 251,
+    "max_depth": 6,
+    "learning_rate": 0.033788751720701275,
+    "num_leaves": 23,
+    "boosting_type": "goss",
+    "min_data_in_leaf": 28,
+    "max_bin": 419,
+    "enable_bundle": false
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.196759,
+    "roc_auc": 0.894997,
+    "official_operating_point": {
+     "threshold": 0.044208,
+     "recall": 0.553162,
+     "false_alerts_per_10000": 499.72,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.175122,
+    "threshold_at_50_fp_10k": 0.213796,
+    "recall_at_100_fp_10k": 0.258165,
+    "threshold_at_100_fp_10k": 0.148108,
+    "recall_at_200_fp_10k": 0.370049,
+    "threshold_at_200_fp_10k": 0.092116,
+    "recall_at_500_fp_10k": 0.553162,
+    "threshold_at_500_fp_10k": 0.044203
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 31,
+    "max_depth": 9,
+    "learning_rate": 0.028815942200021108,
+    "num_leaves": 46,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 25,
+    "max_bin": 164,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.173821,
+    "roc_auc": 0.864971,
+    "official_operating_point": {
+     "threshold": 0.026365,
+     "recall": 0.514941,
+     "false_alerts_per_10000": 499.819,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.161918,
+    "threshold_at_50_fp_10k": 0.083836,
+    "recall_at_100_fp_10k": 0.233148,
+    "threshold_at_100_fp_10k": 0.06255,
+    "recall_at_200_fp_10k": 0.33565,
+    "threshold_at_200_fp_10k": 0.044266,
+    "recall_at_500_fp_10k": 0.514941,
+    "threshold_at_500_fp_10k": 0.026358
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 216,
+    "max_depth": 3,
+    "learning_rate": 0.07634043541385338,
+    "num_leaves": 63,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 20,
+    "max_bin": 460,
+    "enable_bundle": false
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.195887,
+    "roc_auc": 0.895657,
+    "official_operating_point": {
+     "threshold": 0.045379,
+     "recall": 0.551425,
+     "false_alerts_per_10000": 497.445,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.172342,
+    "threshold_at_50_fp_10k": 0.207037,
+    "recall_at_100_fp_10k": 0.256428,
+    "threshold_at_100_fp_10k": 0.141439,
+    "recall_at_200_fp_10k": 0.372828,
+    "threshold_at_200_fp_10k": 0.090369,
+    "recall_at_500_fp_10k": 0.551425,
+    "threshold_at_500_fp_10k": 0.045188
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 203,
+    "max_depth": 9,
+    "learning_rate": 0.02759051663847932,
+    "num_leaves": 10,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 91,
+    "max_bin": 412,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.190384,
+    "roc_auc": 0.89037,
+    "official_operating_point": {
+     "threshold": 0.03753,
+     "recall": 0.538916,
+     "false_alerts_per_10000": 499.77,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.171994,
+    "threshold_at_50_fp_10k": 0.17194,
+    "recall_at_100_fp_10k": 0.249131,
+    "threshold_at_100_fp_10k": 0.117096,
+    "recall_at_200_fp_10k": 0.35615,
+    "threshold_at_200_fp_10k": 0.074572,
+    "recall_at_500_fp_10k": 0.538916,
+    "threshold_at_500_fp_10k": 0.037524
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 220,
+    "max_depth": 5,
+    "learning_rate": 0.04185991646015,
+    "num_leaves": 37,
+    "boosting_type": "goss",
+    "min_data_in_leaf": 8,
+    "max_bin": 198,
+    "enable_bundle": false
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.184067,
+    "roc_auc": 0.894139,
+    "official_operating_point": {
+     "threshold": 0.046617,
+     "recall": 0.545865,
+     "false_alerts_per_10000": 498.929,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.172342,
+    "threshold_at_50_fp_10k": 0.217538,
+    "recall_at_100_fp_10k": 0.259903,
+    "threshold_at_100_fp_10k": 0.148442,
+    "recall_at_200_fp_10k": 0.370744,
+    "threshold_at_200_fp_10k": 0.095991,
+    "recall_at_500_fp_10k": 0.545865,
+    "threshold_at_500_fp_10k": 0.046535
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 194,
+    "max_depth": 9,
+    "learning_rate": 0.04967216385522707,
+    "num_leaves": 58,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 51,
+    "max_bin": 326,
+    "enable_bundle": true
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.186866,
+    "roc_auc": 0.890779,
+    "official_operating_point": {
+     "threshold": 0.043949,
+     "recall": 0.543433,
+     "false_alerts_per_10000": 498.583,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.166782,
+    "threshold_at_50_fp_10k": 0.231399,
+    "recall_at_100_fp_10k": 0.243919,
+    "threshold_at_100_fp_10k": 0.15706,
+    "recall_at_200_fp_10k": 0.357192,
+    "threshold_at_200_fp_10k": 0.096319,
+    "recall_at_500_fp_10k": 0.543433,
+    "threshold_at_500_fp_10k": 0.043832
+   }
+  },
+  {
+   "params": {
+    "n_estimators": 133,
+    "max_depth": 10,
+    "learning_rate": 0.021017000648195387,
+    "num_leaves": 27,
+    "boosting_type": "gbdt",
+    "min_data_in_leaf": 11,
+    "max_bin": 210,
+    "enable_bundle": false
+   },
+   "metrics": {
+    "average_precision_pr_auc": 0.188613,
+    "roc_auc": 0.885391,
+    "official_operating_point": {
+     "threshold": 0.034837,
+     "recall": 0.536831,
+     "false_alerts_per_10000": 499.968,
+     "note": "threshold fitted on these labels by the published protocol"
+    },
+    "recall_at_50_fp_10k": 0.167825,
+    "threshold_at_50_fp_10k": 0.150229,
+    "recall_at_100_fp_10k": 0.247741,
+    "threshold_at_100_fp_10k": 0.10454,
+    "recall_at_200_fp_10k": 0.35476,
+    "threshold_at_200_fp_10k": 0.06775,
+    "recall_at_500_fp_10k": 0.536831,
+    "threshold_at_500_fp_10k": 0.034837
+   }
+  }
+ ],
+ "best_trial": {
+  "params": {
+   "n_estimators": 251,
+   "max_depth": 6,
+   "learning_rate": 0.033788751720701275,
+   "num_leaves": 23,
+   "boosting_type": "goss",
+   "min_data_in_leaf": 28,
+   "max_bin": 419,
+   "enable_bundle": false
+  },
+  "metrics": {
+   "average_precision_pr_auc": 0.196759,
+   "roc_auc": 0.894997,
+   "official_operating_point": {
+    "threshold": 0.044208,
+    "recall": 0.553162,
+    "false_alerts_per_10000": 499.72,
+    "note": "threshold fitted on these labels by the published protocol"
+   },
+   "recall_at_50_fp_10k": 0.175122,
+   "threshold_at_50_fp_10k": 0.213796,
+   "recall_at_100_fp_10k": 0.258165,
+   "threshold_at_100_fp_10k": 0.148108,
+   "recall_at_200_fp_10k": 0.370049,
+   "threshold_at_200_fp_10k": 0.092116,
+   "recall_at_500_fp_10k": 0.553162,
+   "threshold_at_500_fp_10k": 0.044203
+  }
+ },
+ "ablations": {
+  "official": {
+   "average_precision_pr_auc": 0.196759,
+   "roc_auc": 0.894997,
+   "official_operating_point": {
+    "threshold": 0.044208,
+    "recall": 0.553162,
+    "false_alerts_per_10000": 499.72,
+    "note": "threshold fitted on these labels by the published protocol"
+   },
+   "recall_at_50_fp_10k": 0.175122,
+   "threshold_at_50_fp_10k": 0.213796,
+   "recall_at_100_fp_10k": 0.258165,
+   "threshold_at_100_fp_10k": 0.148108,
+   "recall_at_200_fp_10k": 0.370049,
+   "threshold_at_200_fp_10k": 0.092116,
+   "recall_at_500_fp_10k": 0.553162,
+   "threshold_at_500_fp_10k": 0.044203
+  },
+  "no_month": {
+   "average_precision_pr_auc": 0.195842,
+   "roc_auc": 0.894271,
+   "official_operating_point": {
+    "threshold": 0.040891,
+    "recall": 0.55073,
+    "false_alerts_per_10000": 499.028,
+    "note": "threshold fitted on these labels by the published protocol"
+   },
+   "recall_at_50_fp_10k": 0.176859,
+   "threshold_at_50_fp_10k": 0.198838,
+   "recall_at_100_fp_10k": 0.25886,
+   "threshold_at_100_fp_10k": 0.135934,
+   "recall_at_200_fp_10k": 0.370396,
+   "threshold_at_200_fp_10k": 0.085197,
+   "recall_at_500_fp_10k": 0.55073,
+   "threshold_at_500_fp_10k": 0.04084
+  },
+  "admissible": {
+   "average_precision_pr_auc": 0.189181,
+   "roc_auc": 0.891955,
+   "official_operating_point": {
+    "threshold": 0.041181,
+    "recall": 0.540306,
+    "false_alerts_per_10000": 499.918,
+    "note": "threshold fitted on these labels by the published protocol"
+   },
+   "recall_at_50_fp_10k": 0.163655,
+   "threshold_at_50_fp_10k": 0.199251,
+   "recall_at_100_fp_10k": 0.241835,
+   "threshold_at_100_fp_10k": 0.13595,
+   "recall_at_200_fp_10k": 0.357192,
+   "threshold_at_200_fp_10k": 0.085903,
+   "recall_at_500_fp_10k": 0.540306,
+   "threshold_at_500_fp_10k": 0.041181
+  }
+ }
+}

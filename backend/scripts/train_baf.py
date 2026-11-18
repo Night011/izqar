@@ -50,8 +50,12 @@ FEATURES = NUMERIC + CATEGORICAL
 FEATURES_V2 = NUMERIC_V2 + CATEGORICAL
 VELOCITY = ['zip_count_4w', 'velocity_6h', 'velocity_24h', 'velocity_4w',
             'bank_branch_count_8w', 'date_of_birth_distinct_emails_4w', 'device_distinct_emails_8w']
+ENGINEERED_VELOCITY = ['velocity_burst_6h', 'velocity_day_vs_month', 'zip_share_4w',
+                       'branch_share_8w', 'dob_email_share', 'device_email_share']
 FEATURE_SETS = {'v1': (NUMERIC, FEATURES), 'v2': (NUMERIC_V2, FEATURES_V2),
-                'v1v': (NUMERIC + VELOCITY, NUMERIC + VELOCITY + CATEGORICAL)}
+                'v1v': (NUMERIC + VELOCITY, NUMERIC + VELOCITY + CATEGORICAL),
+                'v1x': (NUMERIC + VELOCITY + ENGINEERED_VELOCITY,
+                        NUMERIC + VELOCITY + ENGINEERED_VELOCITY + CATEGORICAL)}
 REQUIRED = set(FEATURES) | {'fraud_bool', 'month'}
 SENTINEL_MISSING = ['prev_address_months_count', 'current_address_months_count',
                     'bank_months_count', 'session_length_in_minutes']
@@ -76,6 +80,16 @@ def add_engineered(df: pd.DataFrame) -> pd.DataFrame:
     df['email_free_x_foreign'] = num('email_is_free') * num('foreign_request')
     df['phones_valid_x2'] = num('phone_home_valid') * num('phone_mobile_valid')
     df['age_income_ratio'] = num('customer_age') / (income + 1.0)
+    # Velocity interactions: each aggregate divided by the 4-week baseline turns
+    # an absolute count into an intensity relative to current application flow.
+    if 'velocity_4w' in df.columns:
+        baseline = num('velocity_4w').clip(lower=0) + 1.0
+        df['velocity_burst_6h'] = num('velocity_6h') / baseline
+        df['velocity_day_vs_month'] = num('velocity_24h') / baseline
+        df['zip_share_4w'] = num('zip_count_4w') / baseline
+        df['branch_share_8w'] = num('bank_branch_count_8w') / baseline
+        df['dob_email_share'] = num('date_of_birth_distinct_emails_4w') / baseline
+        df['device_email_share'] = num('device_distinct_emails_8w') / baseline
     return df
 
 
@@ -300,7 +314,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         raise ValueError('early_stopping_rounds must be positive when supplied')
     if max_train_rows is not None and max_train_rows < 100:
         raise ValueError('max_train_rows must be at least 100')
-    data = read_base(data_path, VELOCITY if feature_set == 'v1v' else ())
+    extra = VELOCITY if feature_set in {'v1v', 'v1x'} else ()
+    data = read_base(data_path, extra)
     numeric_cols, feature_cols = FEATURE_SETS[feature_set]
     if feature_set == 'v2':
         data = add_engineered(data)

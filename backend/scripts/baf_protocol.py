@@ -27,7 +27,7 @@ from typing import Iterable
 
 import numpy as np
 
-BUDGET_DIAGNOSTICS = (50.0, 75.0, 100.0)
+BUDGET_DIAGNOSTICS = (50.0, 100.0, 200.0, 500.0)
 
 
 def infold_folds(months: Iterable[int], min_train_months: int = 2) -> list[dict]:
@@ -102,29 +102,36 @@ def select_operating_point(y_calibration, calibration_scores,
     }
 
 
-def evaluate_external(y_external, external_scores, threshold,
-                      budgets=BUDGET_DIAGNOSTICS) -> dict:
-    """Frozen-threshold evaluation plus a clearly labelled post-hoc budget view."""
-    from train_ieee import metrics, ranking_metrics, threshold_analysis
+def budget_tradeoffs(y_true, scores, budgets=BUDGET_DIAGNOSTICS) -> dict:
+    """Post-hoc recall/precision at several false-alert budgets (diagnostic only)."""
+    from train_ieee import metrics, threshold_analysis
 
-    result = metrics(y_external, external_scores, threshold)
-    result.update(ranking_metrics(y_external, external_scores))
-    result['threshold'] = round(float(threshold), 6)
-    result['threshold_source'] = 'frozen from calibration month'
-    budget_view = {}
+    view = {}
     for budget in budgets:
         if budget is None:
             continue
-        cutoff, _ = threshold_analysis(y_external, external_scores, budget)
-        point = metrics(y_external, external_scores, cutoff)
-        budget_view[str(int(budget))] = {
+        cutoff, _ = threshold_analysis(y_true, scores, budget)
+        point = metrics(y_true, scores, cutoff)
+        view[str(int(budget))] = {
             'threshold': round(float(cutoff), 6),
             'recall': point['recall'], 'precision': point['precision'],
             'f1': point['f1'],
             'achieved_false_alerts_per_10000': point['false_alerts_per_10000_operations'],
             'note': 'post-hoc diagnostic only; not used to select the model or threshold',
         }
-    result['post_hoc_budget_diagnostics'] = budget_view
+    return view
+
+
+def evaluate_external(y_external, external_scores, threshold,
+                      budgets=BUDGET_DIAGNOSTICS) -> dict:
+    """Frozen-threshold evaluation plus a clearly labelled post-hoc budget view."""
+    from train_ieee import metrics, ranking_metrics
+
+    result = metrics(y_external, external_scores, threshold)
+    result.update(ranking_metrics(y_external, external_scores))
+    result['threshold'] = round(float(threshold), 6)
+    result['threshold_source'] = 'frozen from calibration month'
+    result['post_hoc_budget_diagnostics'] = budget_tradeoffs(y_external, external_scores, budgets)
     return result
 
 
@@ -162,6 +169,7 @@ def evaluate_external_at_capacity(y_external, external_scores, alert_rate: float
     result['threshold_source'] = 'frozen alert rate replayed on external scores (no labels)'
     result['frozen_alert_rate'] = round(float(alert_rate), 6)
     result['achieved_alert_rate'] = round(float(np.mean(np.asarray(external_scores) >= cutoff)), 6)
+    result['post_hoc_budget_diagnostics'] = budget_tradeoffs(y_external, external_scores)
     return result
 
 

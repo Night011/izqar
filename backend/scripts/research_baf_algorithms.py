@@ -74,7 +74,7 @@ def _ohe_member(name, preprocess, feature_cols, params, max_rounds, predict):
             'predict': predict}
 
 
-def _xgboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, device):
+def _xgboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, device, extra=None):
     from xgboost import XGBClassifier
     preprocess = make_preprocess(numeric_cols)
     y = fit_rows.fraud_bool.astype('int8')
@@ -82,6 +82,7 @@ def _xgboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, d
     spw = (len(y) - positive) / positive
     params = dict(n_estimators=max_rounds, max_depth=4, learning_rate=.06, subsample=.85,
                   colsample_bytree=.85, reg_lambda=4.0, scale_pos_weight=round(spw, 6))
+    params.update(extra or {})
     model = XGBClassifier(**params, objective='binary:logistic', tree_method='hist',
                           eval_metric='aucpr', random_state=seed, device=device,
                           n_jobs=min(4, os.cpu_count() or 1))
@@ -90,13 +91,15 @@ def _xgboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, d
                        lambda matrix, rounds: model.predict_proba(matrix, iteration_range=(0, rounds))[:, 1])
 
 
-def _catboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, device, native=False):
+def _catboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, device,
+                     native=False, extra=None):
     from catboost import CatBoostClassifier
     y = fit_rows.fraud_bool.astype('int8')
     positive = int(y.sum())
     spw = (len(y) - positive) / positive
     model_params = dict(iterations=max_rounds, depth=4, learning_rate=.06,
                         class_weights=[1.0, round(float(spw), 6)])
+    model_params.update({k: v for k, v in (extra or {}).items() if k != 'iterations'})
     params = dict(model_params, native_categorical=native)
     if native:
         medians = {col: float(fit_rows[col].median()) for col in numeric_cols}
@@ -130,30 +133,71 @@ def _catboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, 
                 matrix, ntree_start=0, ntree_end=rounds)[:, 1]}
 
 
-def _lightgbm_member(algo, fit_rows, feature_cols, numeric_cols, *, seed, device):
+def _lightgbm_member(algo, fit_rows, feature_cols, numeric_cols, *, seed, device, extra=None):
     from lightgbm import LGBMClassifier
     preprocess = make_preprocess(numeric_cols)
     y = fit_rows.fraud_bool.astype('int8')
     params = dict(LIGHTGBM_PARAMS[algo])
     if algo == 'lightgbm_reg':
         params['scale_pos_weight'] = round((len(y) - int(y.sum())) / int(y.sum()), 6)
+    params.update(extra or {})
+    max_rounds = int(params['n_estimators'])
     model = LGBMClassifier(**params, random_state=seed, n_jobs=min(4, os.cpu_count() or 1), verbose=-1)
     model.fit(preprocess.fit_transform(fit_rows[feature_cols]), y)
     params['device'] = 'cpu'
-    return _ohe_member(algo, preprocess, feature_cols, params, params['n_estimators'],
+    return _ohe_member(algo, preprocess, feature_cols, params, max_rounds,
                        lambda matrix, rounds: model.predict_proba(matrix, num_iteration=rounds)[:, 1])
 
 
-def build_members(algo, fit_rows, feature_cols, numeric_cols, *, seed, device, max_rounds):
+def _lightgbm_native_member(algo, fit_rows, feature_cols, numeric_cols, *, seed, device, extra=None):
+    """LightGBM with native categoricals and raw NaN, i.e. the published recipe.
+
+    Category codes are frozen on the fit rows; unseen levels map to NaN, which
+    LightGBM treats as missing. Numeric NaN is passed through untouched instead
+    of being imputed, so missingness stays a split direction.
+    """
+    from lightgbm import LGBMClassifier
+    y = fit_rows.fraud_bool.astype('int8')
+    params = dict(LIGHTGBM_PARAMS['lightgbm'])
+    if algo == 'lightgbm_native_reg':
+        params = dict(LIGHTGBM_PARAMS['lightgbm_reg'])
+        params['scale_pos_weight'] = round((len(y) - int(y.sum())) / int(y.sum()), 6)
+    params.update(extra or {})
+    max_rounds = int(params['n_estimators'])
+    codes = {name: {value: index for index, value in enumerate(
+        sorted(fit_rows[name].astype('string').fillna('__missing__').unique()))}
+        for name in CATEGORICAL}
+
+    def transform(frame):
+        out = frame[feature_cols].copy()
+        for name in CATEGORICAL:
+            out[name] = out[name].astype('string').fillna('__missing__').map(codes[name])
+        return out.astype('float32')
+
+    model = LGBMClassifier(**params, random_state=seed, n_jobs=min(4, os.cpu_count() or 1),
+                           verbose=-1)
+    model.fit(transform(fit_rows), y, categorical_feature=CATEGORICAL)
+    return {'name': algo, 'max_rounds': max_rounds, 'params': params, 'transform': transform,
+            'predict': lambda matrix, rounds: model.predict_proba(matrix, num_iteration=rounds)[:, 1]}
+
+
+def build_members(algo, fit_rows, feature_cols, numeric_cols, *, seed, device, max_rounds,
+                  extra_params=None):
     """Return (members, combination). A member is a fitted model plus a frozen-round scorer."""
     if algo == 'xgboost':
         return [_xgboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
-                                max_rounds=max_rounds, device=device)], None
+                                max_rounds=max_rounds, device=device,
+                                extra=extra_params)], None
     if algo in {'catboost', 'catboost_native'}:
         return [_catboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
-                                 max_rounds=max_rounds, device=device, native=algo == 'catboost_native')], None
+                                 max_rounds=max_rounds, device=device,
+                                 native=algo == 'catboost_native', extra=extra_params)], None
     if algo in LIGHTGBM_PARAMS:
-        return [_lightgbm_member(algo, fit_rows, feature_cols, numeric_cols, seed=seed, device=device)], None
+        return [_lightgbm_member(algo, fit_rows, feature_cols, numeric_cols, seed=seed,
+                                 device=device, extra=extra_params)], None
+    if algo in {'lightgbm_native', 'lightgbm_native_reg'}:
+        return [_lightgbm_native_member(algo, fit_rows, feature_cols, numeric_cols, seed=seed,
+                                        device=device, extra=extra_params)], None
     if algo == 'ensemble':
         return [_xgboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
                                 max_rounds=max_rounds, device=device),
@@ -191,10 +235,12 @@ def _select_rounds(y_calibration, matrix, predict, max_rounds: int):
 
 
 def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
-                  numeric_cols, *, seed, device, max_rounds, budget, refit=False) -> dict:
+                  numeric_cols, *, seed, device, max_rounds, budget, refit=False,
+                  extra_params=None, return_scores=False) -> dict:
     started = time.perf_counter()
     members, combination = build_members(algo, fit_rows, feature_cols, numeric_cols,
-                                         seed=seed, device=device, max_rounds=max_rounds)
+                                         seed=seed, device=device, max_rounds=max_rounds,
+                                         extra_params=extra_params)
     fit_seconds = time.perf_counter() - started
     y_calibration = calibration_rows.fraud_bool.to_numpy()
     y_external = external_rows.fraud_bool.to_numpy()
@@ -228,6 +274,9 @@ def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
         'external_metrics_capacity': evaluate_external_at_capacity(
             y_external, external_scores, alert_rate),
     }
+    if return_scores:
+        report['scores'] = {'calibration': np.asarray(calibration_scores, dtype='float32'),
+                            'external': np.asarray(external_scores, dtype='float32')}
 
     if refit:
         # Deploy-before-external retrain: rounds stay frozen, so the calibration
@@ -238,7 +287,8 @@ def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
         chosen = rounds[members[0]['name']]
         refit_members, _ = build_members(algo, pd.concat([fit_rows, calibration_rows]),
                                          feature_cols, numeric_cols, seed=seed,
-                                         device=device, max_rounds=chosen)
+                                         device=device, max_rounds=chosen,
+                                         extra_params=extra_params)
         member = refit_members[0]
         refit_scores = member['predict'](member['transform'](external_rows), chosen)
         report['refit'] = {'rounds': chosen, 'fit_seconds': round(float(time.perf_counter() - refit_started), 3),
@@ -259,16 +309,26 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--algos', nargs='+',
                         default=['xgboost', 'catboost', 'catboost_native', 'lightgbm', 'lightgbm_reg', 'ensemble'])
-    parser.add_argument('--feature-sets', nargs='+', default=['v1'], choices=['v1', 'v2', 'v1v'])
+    parser.add_argument('--feature-sets', nargs='+', default=['v1'], choices=['v1', 'v2', 'v1v', 'v1x'])
     parser.add_argument('--max-rounds', type=int, default=400)
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--refit-on-calibration', action='store_true',
                         help='also score a model refitted on train+calibration with frozen rounds')
+    parser.add_argument('--params-json', type=Path,
+                        help='tuned hyperparameters per algorithm, as written by research_baf_tune.py')
+    parser.add_argument('--mask-balcon-missing', action='store_true',
+                        help='treat negative intended_balcon_amount as missing, per the BAF datasheet')
+    parser.add_argument('--scores-dir', type=Path,
+                        help='save out-of-fold external scores as .npy for later ensembling')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100.0)
     args = parser.parse_args()
 
-    extra = VELOCITY if 'v1v' in args.feature_sets else ()
+    tuned = json.loads(args.params_json.read_text(encoding='utf-8')) if args.params_json else {}
+    extra = VELOCITY if ('v1v' in args.feature_sets or 'v1x' in args.feature_sets) else ()
     data = add_engineered(read_base(args.data, extra))
+    if args.mask_balcon_missing:
+        data['intended_balcon_amount'] = data['intended_balcon_amount'].mask(
+            data['intended_balcon_amount'] < 0)
     parts, boundaries = split_months(data)
     train_rows = parts[0]
     months = sorted(train_rows.month.unique().tolist())
@@ -286,7 +346,20 @@ def main():
                 evaluation = evaluate_fold(
                     algo, fit_rows, calibration_rows, external_rows, feature_cols,
                     numeric_cols, seed=args.seed, device=args.device, max_rounds=args.max_rounds,
-                    budget=args.max_false_alerts_per_10000, refit=args.refit_on_calibration)
+                    budget=args.max_false_alerts_per_10000, refit=args.refit_on_calibration,
+                    extra_params=(tuned.get('best_params') if 'best_params' in tuned
+                                  else tuned.get(algo)),
+                    return_scores=bool(args.scores_dir))
+                if args.scores_dir:
+                    args.scores_dir.mkdir(parents=True, exist_ok=True)
+                    stem = f"{key}_m{fold['external_month']}"
+                    for split in ('calibration', 'external'):
+                        np.save(args.scores_dir / f'{stem}_{split}.npy', evaluation['scores'][split])
+                    np.save(args.scores_dir / f'{stem}_labels.npy',
+                            external_rows.fraud_bool.to_numpy(dtype='int8'))
+                    np.save(args.scores_dir / f'{stem}_cal_labels.npy',
+                            calibration_rows.fraud_bool.to_numpy(dtype='int8'))
+                    del evaluation['scores']
                 fold_reports.append({
                     'train_months': fold['train_months'],
                     'calibration_month': fold['calibration_month'],
