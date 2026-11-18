@@ -208,6 +208,20 @@ Findings:
 3. **Velocity ratio interactions do not help** (−0.002 on both libraries). The absolute counts already carry the signal.
 4. **Only the ensemble moves the mean**, 0.1739 → 0.1759 (+0.0020, driven by m4/m5 and slightly negative on m3), computed from out-of-fold external scores only, with no weight fitted anywhere.
 
+### Stage 12b — extra members, seed repeats, fitted blend weights
+
+| variant | PR-AUC m3/m4/m5 | mean | Δ vs 0.1732 | recall@capacity |
+|---|---|---|---|---|
+| lightgbm native, class-weighted | 0.1526/0.1765/0.1892 | 0.1727 | −0.0005 | .257/.241/.279 |
+| ensemble 4 arms (xgb, lgbm, lgbm_w, cat) | 0.1574/0.1800/0.1928 | 0.1767 | +0.0035 | .256/.253/.283 |
+| ensemble 5 arms (+ catboost one-hot) | 0.1582/0.1798/0.1926 | **0.1769** | **+0.0037** | .259/.250/.282 |
+| ensemble 6 arms (+ lightgbm one-hot) | — | 0.1766 | +0.0034 | — |
+| ensemble 3 models × 2 seeds | 0.1563/0.1792/0.1919 | 0.1758 | +0.0026 | — |
+| ensemble with weights fitted on calibration | — | 0.1753 | +0.0021 | — |
+
+Negative results, all measured: class weighting helps LightGBM alone (+0.0017 over unweighted) but not the blend; repeating seeds of the same algorithm adds ≤0.0009 and dilutes the blend; blend weights fitted on a calibration month (≈660 frauds) are worse than uniform; the one-hot CatBoost and weighted LightGBM members help only as diversity. The blend gain is +0.0037 and lands entirely in m4/m5 — m3 stays at the single-model level.
+
+
 Trade-off at the same folds (post-hoc, threshold-free view; working budget stays 100):
 
 | arm | recall@50 | @100 | @200 | @500 |
@@ -241,6 +255,7 @@ Adoption rule for any step: offline replay of a historical application stream, t
 
 ## Log
 
+- 2026-11-19b: extra ensemble members tested. Best measured: 5-arm rank ensemble (xgboost, lightgbm native, class-weighted lightgbm native, catboost native, catboost one-hot) at mean PR-AUC 0.1769, recall@100 FP/10k 0.264, FP/10k 97/93/96 (+0.0037 vs 0.1732). Seed repeats, fitted blend weights and a sixth member are all flat or worse.
 - 2026-11-19: official Feedzai benchmark reproduced on months 6–7 (PR-AUC 0.1968, recall@5%FPR 0.553); the admissible contract costs −0.0076 PR-AUC. 30+8 Optuna trials on month 2 do not transfer to the folds. Native vs one-hot categoricals, raw NaN vs imputation, balcon/device_email sentinels, and velocity ratio interactions are all inside noise. Best measured: catboost native v1v 0.1739, 3-model rank ensemble 0.1759 (+0.0027 vs 0.1732), recall@100 0.271.
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
 - Research folds (train region only, expanding: valid months 3/4/5; threshold from fold valid, FP/10k budget 100; 400 trees, early stop 40):

@@ -320,6 +320,8 @@ def main():
                         help='treat negative intended_balcon_amount as missing, per the BAF datasheet')
     parser.add_argument('--scores-dir', type=Path,
                         help='save out-of-fold external scores as .npy for later ensembling')
+    parser.add_argument('--scores-tag', default='',
+                        help='suffix for saved score files, e.g. a seed repeat')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100.0)
     args = parser.parse_args()
 
@@ -337,7 +339,7 @@ def main():
     for feats in args.feature_sets:
         feature_cols, numeric_cols = FEATURE_SETS[feats][1], FEATURE_SETS[feats][0]
         for algo in args.algos:
-            key = f'{algo}_{feats}'
+            key = f'{algo}_{feats}{args.scores_tag}'
             fold_reports = []
             for fold in folds:
                 fit_rows = train_rows[train_rows.month.isin(fold['train_months'])]

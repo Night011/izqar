@@ -1,0 +1,690 @@
+{
+ "mode": "research-algorithms-calibrated",
+ "protocol": "calibrated",
+ "trained_at_utc": "2026-11-18T21:13:58.736930+00:00",
+ "seed": 42,
+ "max_false_alerts_per_10000": 100.0,
+ "data_provenance": {
+  "filename": "Base.csv",
+  "size_bytes": 213427735,
+  "sha256": "7bf10a37ce07e72e14c1b09e5efee3d27261baff4facc7da767b0474dcf9b809"
+ },
+ "split_method": "expanding month folds: train < calibration < external, strictly disjoint; rounds and threshold fixed on calibration; penultimate/final months untouched",
+ "results": {
+  "lightgbm_native_reg_v1v": {
+   "folds": [
+    {
+     "train_months": [
+      0,
+      1
+     ],
+     "calibration_month": 2,
+     "external_month": 3,
+     "rows": {
+      "train": 260060,
+      "calibration": 136979,
+      "external": 150936
+     },
+     "checksums": {
+      "train": {
+       "rows": 260060,
+       "fraud_cases": 2698,
+       "fraud_rate": 0.010375,
+       "row_index_sha256": "09c919c91dacc2f9e0933e01f3839dd552638831289799e4b5dd91eeea7ed881"
+      },
+      "calibration": {
+       "rows": 136979,
+       "fraud_cases": 1198,
+       "fraud_rate": 0.008746,
+       "row_index_sha256": "e2a1a57b1f146e856b90dc4ed1cd94cc932298a2e7e53233f88f151a855c63c9"
+      },
+      "external": {
+       "rows": 150936,
+       "fraud_cases": 1392,
+       "fraud_rate": 0.009222,
+       "row_index_sha256": "8c6b7601a87e0b7090d5e0cbc2da2e2edbe09b3fecda8ef5b387a686c7e5539b"
+      }
+     },
+     "rounds": {
+      "lightgbm_native_reg": 750
+     },
+     "fit_seconds": 9.398,
+     "selected_threshold": 0.896392,
+     "selection": {
+      "selection_data": "calibration month only",
+      "max_false_alerts_per_10000": 100.0,
+      "achieved_false_alerts_per_10000_on_calibration": 99.358,
+      "calibration_cases": 136979,
+      "calibration_fraud_cases": 1198,
+      "max_f1_threshold": 0.9007794333175885,
+      "strategy": "false_alert_budget"
+     },
+     "calibration": {
+      "lightgbm_native_reg": {
+       "selected_rounds": 750,
+       "calibration_pr_auc": 0.131631
+      }
+     },
+     "params": {
+      "lightgbm_native_reg": {
+       "n_estimators": 800,
+       "num_leaves": 7,
+       "learning_rate": 0.03,
+       "subsample": 0.8,
+       "colsample_bytree": 0.6,
+       "reg_lambda": 20.0,
+       "min_child_samples": 500,
+       "scale_pos_weight": 95.389918
+      }
+     },
+     "combination": null,
+     "capacity_alert_rate": 0.012104,
+     "external_metrics": {
+      "average_precision_pr_auc": 0.152572,
+      "roc_auc": 0.91241,
+      "precision": 0.137101,
+      "recall": 0.400862,
+      "f1": 0.204321,
+      "confusion_matrix_tn_fp_fn_tp": [
+       146032,
+       3512,
+       834,
+       558
+      ],
+      "false_positive_rate": 0.023485,
+      "false_negative_rate": 0.599138,
+      "false_alerts_per_10000_operations": 232.681,
+      "cases": 150936,
+      "fraud_cases": 1392,
+      "100": {
+       "alerts": 100,
+       "precision_at_k": 0.49,
+       "recall_at_k": 0.035201,
+       "true_positives_at_k": 49
+      },
+      "500": {
+       "alerts": 500,
+       "precision_at_k": 0.314,
+       "recall_at_k": 0.112787,
+       "true_positives_at_k": 157
+      },
+      "1000": {
+       "alerts": 1000,
+       "precision_at_k": 0.243,
+       "recall_at_k": 0.174569,
+       "true_positives_at_k": 243
+      },
+      "threshold": 0.896392,
+      "threshold_source": "frozen from calibration month",
+      "post_hoc_budget_diagnostics": {
+       "50": {
+        "threshold": 0.948373,
+        "recall": 0.174569,
+        "precision": 0.247959,
+        "f1": 0.20489,
+        "achieved_false_alerts_per_10000": 48.829,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "100": {
+        "threshold": 0.930896,
+        "recall": 0.258621,
+        "precision": 0.193029,
+        "f1": 0.221062,
+        "achieved_false_alerts_per_10000": 99.711,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "200": {
+        "threshold": 0.904542,
+        "recall": 0.37069,
+        "precision": 0.146466,
+        "f1": 0.209969,
+        "achieved_false_alerts_per_10000": 199.224,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "500": {
+        "threshold": 0.839103,
+        "recall": 0.572557,
+        "precision": 0.096841,
+        "f1": 0.165662,
+        "achieved_false_alerts_per_10000": 492.46,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       }
+      }
+     },
+     "external_metrics_capacity": {
+      "average_precision_pr_auc": 0.152572,
+      "roc_auc": 0.91241,
+      "precision": 0.19595,
+      "recall": 0.257184,
+      "f1": 0.222429,
+      "confusion_matrix_tn_fp_fn_tp": [
+       148075,
+       1469,
+       1034,
+       358
+      ],
+      "false_positive_rate": 0.009823,
+      "false_negative_rate": 0.742816,
+      "false_alerts_per_10000_operations": 97.326,
+      "cases": 150936,
+      "fraud_cases": 1392,
+      "100": {
+       "alerts": 100,
+       "precision_at_k": 0.49,
+       "recall_at_k": 0.035201,
+       "true_positives_at_k": 49
+      },
+      "500": {
+       "alerts": 500,
+       "precision_at_k": 0.314,
+       "recall_at_k": 0.112787,
+       "true_positives_at_k": 157
+      },
+      "1000": {
+       "alerts": 1000,
+       "precision_at_k": 0.243,
+       "recall_at_k": 0.174569,
+       "true_positives_at_k": 243
+      },
+      "threshold": 0.93172,
+      "threshold_source": "frozen alert rate replayed on external scores (no labels)",
+      "frozen_alert_rate": 0.012104,
+      "achieved_alert_rate": 0.012104,
+      "post_hoc_budget_diagnostics": {
+       "50": {
+        "threshold": 0.948373,
+        "recall": 0.174569,
+        "precision": 0.247959,
+        "f1": 0.20489,
+        "achieved_false_alerts_per_10000": 48.829,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "100": {
+        "threshold": 0.930896,
+        "recall": 0.258621,
+        "precision": 0.193029,
+        "f1": 0.221062,
+        "achieved_false_alerts_per_10000": 99.711,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "200": {
+        "threshold": 0.904542,
+        "recall": 0.37069,
+        "precision": 0.146466,
+        "f1": 0.209969,
+        "achieved_false_alerts_per_10000": 199.224,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "500": {
+        "threshold": 0.839103,
+        "recall": 0.572557,
+        "precision": 0.096841,
+        "f1": 0.165662,
+        "achieved_false_alerts_per_10000": 492.46,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       }
+      }
+     }
+    },
+    {
+     "train_months": [
+      0,
+      1,
+      2
+     ],
+     "calibration_month": 3,
+     "external_month": 4,
+     "rows": {
+      "train": 397039,
+      "calibration": 150936,
+      "external": 127691
+     },
+     "checksums": {
+      "train": {
+       "rows": 397039,
+       "fraud_cases": 3896,
+       "fraud_rate": 0.009813,
+       "row_index_sha256": "3b37e647b2336c6d9e8d3df7d9761323ab9be5288bbfb1a8169c76969b652411"
+      },
+      "calibration": {
+       "rows": 150936,
+       "fraud_cases": 1392,
+       "fraud_rate": 0.009222,
+       "row_index_sha256": "8c6b7601a87e0b7090d5e0cbc2da2e2edbe09b3fecda8ef5b387a686c7e5539b"
+      },
+      "external": {
+       "rows": 127691,
+       "fraud_cases": 1452,
+       "fraud_rate": 0.011371,
+       "row_index_sha256": "925b8a18a851522850143fe039c2eac7898a1ed34fc49daf240fc07532b2c87e"
+      }
+     },
+     "rounds": {
+      "lightgbm_native_reg": 775
+     },
+     "fit_seconds": 16.529,
+     "selected_threshold": 0.937269,
+     "selection": {
+      "selection_data": "calibration month only",
+      "max_false_alerts_per_10000": 100.0,
+      "achieved_false_alerts_per_10000_on_calibration": 99.844,
+      "calibration_cases": 150936,
+      "calibration_fraud_cases": 1392,
+      "max_f1_threshold": 0.932430641123588,
+      "strategy": "false_alert_budget"
+     },
+     "calibration": {
+      "lightgbm_native_reg": {
+       "selected_rounds": 775,
+       "calibration_pr_auc": 0.15836
+      }
+     },
+     "params": {
+      "lightgbm_native_reg": {
+       "n_estimators": 800,
+       "num_leaves": 7,
+       "learning_rate": 0.03,
+       "subsample": 0.8,
+       "colsample_bytree": 0.6,
+       "reg_lambda": 20.0,
+       "min_child_samples": 500,
+       "scale_pos_weight": 100.909394
+      }
+     },
+     "combination": null,
+     "capacity_alert_rate": 0.012297,
+     "external_metrics": {
+      "average_precision_pr_auc": 0.176463,
+      "roc_auc": 0.906799,
+      "precision": 0.224741,
+      "recall": 0.238981,
+      "f1": 0.231642,
+      "confusion_matrix_tn_fp_fn_tp": [
+       125042,
+       1197,
+       1105,
+       347
+      ],
+      "false_positive_rate": 0.009482,
+      "false_negative_rate": 0.761019,
+      "false_alerts_per_10000_operations": 93.742,
+      "cases": 127691,
+      "fraud_cases": 1452,
+      "100": {
+       "alerts": 100,
+       "precision_at_k": 0.6,
+       "recall_at_k": 0.041322,
+       "true_positives_at_k": 60
+      },
+      "500": {
+       "alerts": 500,
+       "precision_at_k": 0.362,
+       "recall_at_k": 0.124656,
+       "true_positives_at_k": 181
+      },
+      "1000": {
+       "alerts": 1000,
+       "precision_at_k": 0.265,
+       "recall_at_k": 0.182507,
+       "true_positives_at_k": 265
+      },
+      "threshold": 0.937269,
+      "threshold_source": "frozen from calibration month",
+      "post_hoc_budget_diagnostics": {
+       "50": {
+        "threshold": 0.952419,
+        "recall": 0.172176,
+        "precision": 0.281532,
+        "f1": 0.213675,
+        "achieved_false_alerts_per_10000": 49.964,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "100": {
+        "threshold": 0.935865,
+        "recall": 0.243802,
+        "precision": 0.218115,
+        "f1": 0.230244,
+        "achieved_false_alerts_per_10000": 99.381,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "200": {
+        "threshold": 0.91014,
+        "recall": 0.356749,
+        "precision": 0.169281,
+        "f1": 0.22961,
+        "achieved_false_alerts_per_10000": 199.074,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "500": {
+        "threshold": 0.845199,
+        "recall": 0.56405,
+        "precision": 0.114083,
+        "f1": 0.189781,
+        "achieved_false_alerts_per_10000": 498.077,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       }
+      }
+     },
+     "external_metrics_capacity": {
+      "average_precision_pr_auc": 0.176463,
+      "roc_auc": 0.906799,
+      "precision": 0.222788,
+      "recall": 0.241047,
+      "f1": 0.231558,
+      "confusion_matrix_tn_fp_fn_tp": [
+       125018,
+       1221,
+       1102,
+       350
+      ],
+      "false_positive_rate": 0.009672,
+      "false_negative_rate": 0.758953,
+      "false_alerts_per_10000_operations": 95.621,
+      "cases": 127691,
+      "fraud_cases": 1452,
+      "100": {
+       "alerts": 100,
+       "precision_at_k": 0.6,
+       "recall_at_k": 0.041322,
+       "true_positives_at_k": 60
+      },
+      "500": {
+       "alerts": 500,
+       "precision_at_k": 0.362,
+       "recall_at_k": 0.124656,
+       "true_positives_at_k": 181
+      },
+      "1000": {
+       "alerts": 1000,
+       "precision_at_k": 0.265,
+       "recall_at_k": 0.182507,
+       "true_positives_at_k": 265
+      },
+      "threshold": 0.936803,
+      "threshold_source": "frozen alert rate replayed on external scores (no labels)",
+      "frozen_alert_rate": 0.012297,
+      "achieved_alert_rate": 0.012303,
+      "post_hoc_budget_diagnostics": {
+       "50": {
+        "threshold": 0.952419,
+        "recall": 0.172176,
+        "precision": 0.281532,
+        "f1": 0.213675,
+        "achieved_false_alerts_per_10000": 49.964,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "100": {
+        "threshold": 0.935865,
+        "recall": 0.243802,
+        "precision": 0.218115,
+        "f1": 0.230244,
+        "achieved_false_alerts_per_10000": 99.381,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "200": {
+        "threshold": 0.91014,
+        "recall": 0.356749,
+        "precision": 0.169281,
+        "f1": 0.22961,
+        "achieved_false_alerts_per_10000": 199.074,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "500": {
+        "threshold": 0.845199,
+        "recall": 0.56405,
+        "precision": 0.114083,
+        "f1": 0.189781,
+        "achieved_false_alerts_per_10000": 498.077,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       }
+      }
+     }
+    },
+    {
+     "train_months": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "calibration_month": 4,
+     "external_month": 5,
+     "rows": {
+      "train": 547975,
+      "calibration": 127691,
+      "external": 119323
+     },
+     "checksums": {
+      "train": {
+       "rows": 547975,
+       "fraud_cases": 5288,
+       "fraud_rate": 0.00965,
+       "row_index_sha256": "376dd573cbfa88bb279838ba160793415291d27a2ea126a8da55e46be3470ced"
+      },
+      "calibration": {
+       "rows": 127691,
+       "fraud_cases": 1452,
+       "fraud_rate": 0.011371,
+       "row_index_sha256": "925b8a18a851522850143fe039c2eac7898a1ed34fc49daf240fc07532b2c87e"
+      },
+      "external": {
+       "rows": 119323,
+       "fraud_cases": 1411,
+       "fraud_rate": 0.011825,
+       "row_index_sha256": "453f5006ab4e476b3bfd5ffb7c612d4fa7b4d5209d84c86f9f5bcf0217e138a1"
+      }
+     },
+     "rounds": {
+      "lightgbm_native_reg": 775
+     },
+     "fit_seconds": 20.365,
+     "selected_threshold": 0.927483,
+     "selection": {
+      "selection_data": "calibration month only",
+      "max_false_alerts_per_10000": 100.0,
+      "achieved_false_alerts_per_10000_on_calibration": 98.128,
+      "calibration_cases": 127691,
+      "calibration_fraud_cases": 1452,
+      "max_f1_threshold": 0.919818800827993,
+      "strategy": "false_alert_budget"
+     },
+     "calibration": {
+      "lightgbm_native_reg": {
+       "selected_rounds": 775,
+       "calibration_pr_auc": 0.179362
+      }
+     },
+     "params": {
+      "lightgbm_native_reg": {
+       "n_estimators": 800,
+       "num_leaves": 7,
+       "learning_rate": 0.03,
+       "subsample": 0.8,
+       "colsample_bytree": 0.6,
+       "reg_lambda": 20.0,
+       "min_child_samples": 500,
+       "scale_pos_weight": 102.626135
+      }
+     },
+     "combination": null,
+     "capacity_alert_rate": 0.012695,
+     "external_metrics": {
+      "average_precision_pr_auc": 0.189193,
+      "roc_auc": 0.895012,
+      "precision": 0.315844,
+      "recall": 0.217576,
+      "f1": 0.257658,
+      "confusion_matrix_tn_fp_fn_tp": [
+       117247,
+       665,
+       1104,
+       307
+      ],
+      "false_positive_rate": 0.00564,
+      "false_negative_rate": 0.782424,
+      "false_alerts_per_10000_operations": 55.731,
+      "cases": 119323,
+      "fraud_cases": 1411,
+      "100": {
+       "alerts": 100,
+       "precision_at_k": 0.58,
+       "recall_at_k": 0.041106,
+       "true_positives_at_k": 58
+      },
+      "500": {
+       "alerts": 500,
+       "precision_at_k": 0.398,
+       "recall_at_k": 0.141035,
+       "true_positives_at_k": 199
+      },
+      "1000": {
+       "alerts": 1000,
+       "precision_at_k": 0.31,
+       "recall_at_k": 0.219702,
+       "true_positives_at_k": 310
+      },
+      "threshold": 0.927483,
+      "threshold_source": "frozen from calibration month",
+      "post_hoc_budget_diagnostics": {
+       "50": {
+        "threshold": 0.931692,
+        "recall": 0.200567,
+        "precision": 0.326413,
+        "f1": 0.248464,
+        "achieved_false_alerts_per_10000": 48.943,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "100": {
+        "threshold": 0.904496,
+        "recall": 0.284196,
+        "precision": 0.253477,
+        "f1": 0.267959,
+        "achieved_false_alerts_per_10000": 98.975,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "200": {
+        "threshold": 0.862662,
+        "recall": 0.374203,
+        "precision": 0.181631,
+        "f1": 0.244558,
+        "achieved_false_alerts_per_10000": 199.375,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "500": {
+        "threshold": 0.764617,
+        "recall": 0.535082,
+        "precision": 0.112485,
+        "f1": 0.185892,
+        "achieved_false_alerts_per_10000": 499.233,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       }
+      }
+     },
+     "external_metrics_capacity": {
+      "average_precision_pr_auc": 0.189193,
+      "roc_auc": 0.895012,
+      "precision": 0.259406,
+      "recall": 0.278526,
+      "f1": 0.268626,
+      "confusion_matrix_tn_fp_fn_tp": [
+       116790,
+       1122,
+       1018,
+       393
+      ],
+      "false_positive_rate": 0.009516,
+      "false_negative_rate": 0.721474,
+      "false_alerts_per_10000_operations": 94.03,
+      "cases": 119323,
+      "fraud_cases": 1411,
+      "100": {
+       "alerts": 100,
+       "precision_at_k": 0.58,
+       "recall_at_k": 0.041106,
+       "true_positives_at_k": 58
+      },
+      "500": {
+       "alerts": 500,
+       "precision_at_k": 0.398,
+       "recall_at_k": 0.141035,
+       "true_positives_at_k": 199
+      },
+      "1000": {
+       "alerts": 1000,
+       "precision_at_k": 0.31,
+       "recall_at_k": 0.219702,
+       "true_positives_at_k": 310
+      },
+      "threshold": 0.907051,
+      "threshold_source": "frozen alert rate replayed on external scores (no labels)",
+      "frozen_alert_rate": 0.012695,
+      "achieved_alert_rate": 0.012697,
+      "post_hoc_budget_diagnostics": {
+       "50": {
+        "threshold": 0.931692,
+        "recall": 0.200567,
+        "precision": 0.326413,
+        "f1": 0.248464,
+        "achieved_false_alerts_per_10000": 48.943,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "100": {
+        "threshold": 0.904496,
+        "recall": 0.284196,
+        "precision": 0.253477,
+        "f1": 0.267959,
+        "achieved_false_alerts_per_10000": 98.975,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "200": {
+        "threshold": 0.862662,
+        "recall": 0.374203,
+        "precision": 0.181631,
+        "f1": 0.244558,
+        "achieved_false_alerts_per_10000": 199.375,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       },
+       "500": {
+        "threshold": 0.764617,
+        "recall": 0.535082,
+        "precision": 0.112485,
+        "f1": 0.185892,
+        "achieved_false_alerts_per_10000": 499.233,
+        "note": "post-hoc diagnostic only; not used to select the model or threshold"
+       }
+      }
+     }
+    }
+   ],
+   "mean_metrics": {
+    "average_precision_pr_auc": 0.172743,
+    "roc_auc": 0.90474,
+    "precision": 0.225895,
+    "recall": 0.285806,
+    "f1": 0.231207,
+    "false_positive_rate": 0.012869,
+    "false_negative_rate": 0.714194,
+    "false_alerts_per_10000_operations": 127.384667,
+    "cases": 132650.0,
+    "fraud_cases": 1418.333333,
+    "threshold": 0.920381
+   },
+   "mean_metrics_capacity": {
+    "average_precision_pr_auc": 0.172743,
+    "roc_auc": 0.90474,
+    "precision": 0.226048,
+    "recall": 0.258919,
+    "f1": 0.240871,
+    "false_positive_rate": 0.00967,
+    "false_negative_rate": 0.741081,
+    "false_alerts_per_10000_operations": 95.659,
+    "cases": 132650.0,
+    "fraud_cases": 1418.333333,
+    "threshold": 0.925191,
+    "frozen_alert_rate": 0.012365,
+    "achieved_alert_rate": 0.012368
+   },
+   "mean_metrics_refit_capacity": {}
+  }
+ }
+}
