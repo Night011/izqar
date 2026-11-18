@@ -22,3 +22,15 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 - Revert note: to roll back the IBM+IEEE merge use targeted `git revert` on the specific merge commit — never reset main to 0d2e9ea (would lose both agents' work).
 
 ## Log
+
+- 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
+- Research folds (train region only, expanding: valid months 3/4/5; threshold from fold valid, FP/10k budget 100; 400 trees, early stop 40):
+
+| Config | Fold3 (0.141) PR-AUC | Fold4 | Fold5 | Mean PR-AUC | Mean F1 | Mean FP/10k | P@100 (folds) | P@1000 (folds) |
+|---|---|---|---|---|---|---|---|---|
+| v1 (20 feat, XGB 180-config) | 0.141364 (rows 397k) | 0.160951 (548k) | 0.167087 (676k) | 0.156467 | 0.2266 | 99.6 | 0.46/0.50/0.50 | 0.230/0.257/0.291 |
+| v2 (+12 engineered) | 0.138503 | 0.159649 | 0.166637 | 0.154930 | 0.2298 | 99.1 | 0.49/0.46/0.48 | 0.225/0.262/0.282 |
+| velocity (v2 + 7 velocity aggs) | 0.154405 | 0.177726 | 0.189083 | **0.173738** | 0.2426 | 99.5 | 0.55/0.56/0.59 | 0.235/0.264/0.310 |
+
+- v2 engineered features: NO measurable gain (mean PR-AUC −0.0015). Velocity aggregates: +0.0173 mean PR-AUC, P@100 +0.10 — meaningful headroom, but NOT deployable without a verified streaming aggregation pipeline (application-time availability unverified). Decision: candidate keeps v1 feature contract + tuning; velocity documented as blocked enhancement.
+- Kaggle GPU kernel `hoogle57/izqar-baf-algorithms-gpu-v1` pushed (pinned 97ebd1b): XGBoost vs LightGBM vs CatBoost × v1/v2 on identical folds. Pending.
