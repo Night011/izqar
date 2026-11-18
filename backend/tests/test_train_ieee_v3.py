@@ -36,3 +36,10 @@ def test_causal_freq_no_future_information_when_labels_differ():
     df = pd.DataFrame({'card1': ['A', 'A', 'A']})
     out = t.add_causal_freq(df)
     assert out['card1_freq'].tolist() == [0, 1, 2]
+
+
+def test_causal_freq_log_scale():
+    import numpy as np
+    df = pd.DataFrame({'card1': ['A', 'A', 'A']})
+    out = t.add_causal_freq(df, scale='log')
+    assert np.allclose(out['card1_freq'].tolist(), np.log1p([0, 1, 2]))

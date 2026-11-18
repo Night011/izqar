@@ -52,9 +52,11 @@ ENGINEERED_NUMERIC = ['amt_log', 'amt_cents', 'dt_hour', 'dt_day', 'email_match'
 FREQ_SOURCES = {'card1_freq': ['card1'], 'card1_card5_freq': ['card1', 'card5'],
                 'card2_freq': ['card2'], 'addr1_freq': ['addr1'],
                 'p_email_freq': ['P_emaildomain'], 'device_freq': ['DeviceInfo']}
-# Expanding folds inside the first 85% of the chronological data:
-# (train_frac, valid_frac) pairs. The 15% tail is never used in research mode.
-RESEARCH_FOLDS = ((.40, .55), (.55, .70), (.70, .85))
+# Expanding folds inside the first 85% of the chronological data (the tail is
+# physically excluded before any processing). Fractions are relative to the
+# truncated pool and match the original .40/.55/.70/.85 boundaries of full data.
+RESEARCH_CEILING = .85
+RESEARCH_FOLDS = ((.47, .647), (.647, .824), (.824, 1.0))
 
 
 def add_engineered(df: pd.DataFrame) -> pd.DataFrame:
@@ -80,14 +82,18 @@ def freq_key(df: pd.DataFrame, cols: list[str]) -> pd.Series:
     return df[cols[0]].astype('string').fillna('__missing__')
 
 
-def add_causal_freq(df: pd.DataFrame) -> pd.DataFrame:
-    """Prior-occurrence counts; strictly causal because df is TransactionDT-sorted."""
+def add_causal_freq(df: pd.DataFrame, scale: str = 'linear') -> pd.DataFrame:
+    """Prior-occurrence counts; strictly causal because df is TransactionDT-sorted.
+
+    scale='linear' keeps raw prior counts; 'log' applies log1p to compress heavy tails.
+    """
     df = df.copy()
     for name, cols in FREQ_SOURCES.items():
         if any(col not in df.columns for col in cols):
             continue
         key = freq_key(df, cols)
-        df[name] = key.groupby(key).cumcount().astype('float32')
+        counts = key.groupby(key).cumcount().astype('float32')
+        df[name] = np.log1p(counts) if scale == 'log' else counts
     return df
 
 
@@ -187,11 +193,13 @@ def load_sorted(data_dir: Path, max_rows: int | None) -> pd.DataFrame:
 def build_features(data: pd.DataFrame, freq_mode: str) -> pd.DataFrame:
     data = add_engineered(data)
     if freq_mode == 'causal':
-        data = add_causal_freq(data)
+        data = add_causal_freq(data, scale='linear')
+    elif freq_mode == 'causal_log':
+        data = add_causal_freq(data, scale='log')
     return data
 
 
-def run_research(data: pd.DataFrame, args, t0: float):
+def run_research(data: pd.DataFrame, args, t0: float, excluded_tail_rows: int):
     n = len(data)
     fold_reports = []
     for train_frac, valid_frac in RESEARCH_FOLDS:
@@ -221,7 +229,9 @@ def run_research(data: pd.DataFrame, args, t0: float):
     report = {'mode': 'research', 'freq_mode': args.freq,
               'trained_at_utc': datetime.now(timezone.utc).isoformat(),
               'folds': fold_reports, 'mean_metrics': mean_metrics,
-              'features_used': report_features, 'note': 'The 15% chronological tail was never loaded for evaluation.',
+              'features_used': report_features,
+              'excluded_tail_rows': excluded_tail_rows,
+              'note': 'Final 15% tail was physically excluded before engineering; labels, features and statistics of the tail were never used.',
               'train_seconds': round(time.time() - t0, 1)}
     return report
 
@@ -282,14 +292,19 @@ def main():
     parser.add_argument('--max-rows', type=int, default=None)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--mode', choices=['research', 'final'], default='research')
-    parser.add_argument('--freq', choices=['causal', 'none'], default='causal')
+    parser.add_argument('--freq', choices=['causal', 'causal_log', 'none'], default='causal')
     parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
     t0 = time.time()
     data = load_sorted(args.data_dir, args.max_rows)
+    excluded_tail_rows = 0
+    if args.mode == 'research':
+        cutoff = int(len(data) * RESEARCH_CEILING)
+        excluded_tail_rows = len(data) - cutoff
+        data = data.iloc[:cutoff].reset_index(drop=True)  # physically exclude the tail before any processing
     data = build_features(data, args.freq)
     if args.mode == 'research':
-        report = run_research(data, args, t0)
+        report = run_research(data, args, t0, excluded_tail_rows)
         out = Path(str(args.output).replace('.joblib', '.cv.metrics.json')) if str(args.output).endswith('.joblib') \
             else Path(args.output).with_suffix('.cv.metrics.json')
         out.parent.mkdir(parents=True, exist_ok=True)
