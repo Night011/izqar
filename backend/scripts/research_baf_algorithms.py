@@ -32,14 +32,14 @@ def make_preprocess(numeric_cols):
                               ('categorical', categorical, CATEGORICAL)])
 
 
-def make_model(algo, spw, seed):
+def make_model(algo, spw, seed, device='cuda'):
     if algo == 'xgboost':
         from xgboost import XGBClassifier
         return XGBClassifier(n_estimators=400, max_depth=4, learning_rate=.06,
                              subsample=.85, colsample_bytree=.85, reg_lambda=4,
                              objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
                              scale_pos_weight=spw, random_state=seed, n_jobs=min(4, os.cpu_count() or 1),
-                             early_stopping_rounds=40, device='cuda')
+                             early_stopping_rounds=40, device=device)
     if algo == 'lightgbm':
         from lightgbm import LGBMClassifier, early_stopping, log_evaluation
         return LGBMClassifier(n_estimators=400, max_depth=4, num_leaves=15, learning_rate=.06,
@@ -51,17 +51,17 @@ def make_model(algo, spw, seed):
         return CatBoostClassifier(iterations=400, depth=4, learning_rate=.06,
                                   loss_function='Logloss', eval_metric='PRAUC',
                                   class_weights=[1.0, float(spw)], random_state=seed,
-                                  od_type='Iter', od_wait=40, verbose=False, task_type='GPU')
+                                  od_type='Iter', od_wait=40, verbose=False, task_type=('GPU' if device == 'cuda' else 'CPU'))
     raise ValueError(algo)
 
 
-def run_fold(algo, feats, train_rows, fold_valid, features, seed):
+def run_fold(algo, feats, train_rows, fold_valid, features, seed, device='cuda'):
     numeric_cols = FEATURE_SETS[feats][0]
     pre = make_preprocess(numeric_cols)
     y_fold = train_rows.fraud_bool.astype('int8')
     pos = int(y_fold.sum())
     spw = (len(y_fold) - pos) / pos
-    built = make_model(algo, spw, seed)
+    built = make_model(algo, spw, seed, device)
     model, callbacks = (built, None) if algo != 'lightgbm' else built
     x_tr = pre.fit_transform(train_rows[features])
     x_va = pre.transform(fold_valid[features])
@@ -84,6 +84,8 @@ def main():
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--algos', nargs='+', default=['xgboost', 'lightgbm', 'catboost'])
+    parser.add_argument('--device', default='cuda')
     args = parser.parse_args()
 
     data = read_base(args.data)
@@ -94,13 +96,13 @@ def main():
     results = {}
     for feats in ['v1', 'v2']:
         features = FEATURE_SETS[feats][1]
-        for algo in ['xgboost', 'lightgbm', 'catboost']:
+        for algo in args.algos:
             key = f'{algo}_{feats}'
             results[key] = []
             for k in range(3, len(months)):
                 fold_train = train_rows[train_rows.month.isin(months[:k])]
                 fold_valid = train_rows[train_rows.month == months[k]]
-                m = run_fold(algo, feats, fold_train, fold_valid, features, args.seed)
+                m = run_fold(algo, feats, fold_train, fold_valid, features, args.seed, args.device)
                 results[key].append({'valid_month': months[k], 'metrics': m})
                 print(f'{key} fold valid {months[k]}: PR-AUC {m["average_precision_pr_auc"]:.6f} '
                       f'F1 {m["f1"]:.6f}', flush=True)
