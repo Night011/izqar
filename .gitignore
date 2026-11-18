@@ -10,5 +10,9 @@ backend/models/
 backend/data/
 frontend/node_modules/
 frontend/dist/
+frontend/*.tsbuildinfo
 .DS_Store
 *.log
+
+# Local training artifacts (worktree root)
+/models/

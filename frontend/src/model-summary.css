@@ -1,0 +1,5 @@
+.model-summary{margin:0 22px 22px;padding:14px;border:1px solid #27484c;border-radius:9px;color:#b9d4d9;font-size:11px}
+.model-summary>strong{display:block;margin-bottom:9px}
+.model-summary>div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid #263c48}
+.model-summary>div span:last-child{color:#7fcbb9}
+.model-summary small{display:block;color:#718d9d;line-height:1.5;margin-top:8px}

@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowDownLeft, ArrowRight, ArrowUpRight, BarChart3, Check, ChevronRight, CircleHelp, Clock, Cpu, Fingerprint, GitBranch, KeyRound, LockKeyhole, LogOut, Play, RefreshCcw, Search, Shield, ShieldAlert, ShieldCheck, Wallet, X } from 'lucide-react';
-import { Graph } from './Graph';
 import { money, request, shortDate } from './api';
-import type { GraphData, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
+import type { GraphData, IbmGraphReport, Metrics, ModelStatus, Review, Scenario, Transaction } from './api';
 import './styles.css';
+import './model-summary.css';
+import './investigations.css';
+
+// Cytoscape and the investigation/ML workspaces are useful only after an
+// analyst opens their respective tab. Keep the initial dashboard bundle small
+// for a local demo machine and load each workspace on demand.
+const Graph = lazy(() => import('./Graph').then(module => ({ default: module.Graph })));
+const MLAnalytics = lazy(() => import('./MLAnalytics').then(module => ({ default: module.MLAnalytics })));
+const InvestigationWorkspace = lazy(() => import('./InvestigationWorkspace').then(module => ({ default: module.InvestigationWorkspace })));
+const LoadingWorkspace = () => <div className="empty-state big"><Activity size={27}/><strong>Загружаем рабочее пространство…</strong></div>;
 
 const scenarios: { type: Scenario; label: string; description: string }[] = [
   { type: 'normal', label: 'Обычная оплата', description: 'Небольшая покупка' },
@@ -12,12 +21,13 @@ const scenarios: { type: Scenario; label: string; description: string }[] = [
   { type: 'velocity', label: 'Серия переводов', description: 'Много операций за короткое время' },
   { type: 'fan_in', label: 'Сеть получателей', description: 'Несколько отправителей → один счёт' },
   { type: 'chain', label: 'Цепочка переводов', description: 'Последовательное движение средств' },
+  { type: 'cycle', label: 'Цикл переводов', description: 'Замкнутое направление средств' },
 ];
 const riskLabels = { low: 'Низкий риск', medium: 'Средний риск', high: 'Высокий риск' };
 const decisionLabels: Record<string, string> = { allow: 'Разрешено', step_up: 'Доп. проверка', review: 'На рассмотрении' };
-const reviewLabels: Record<Review, string> = { pending: 'Не проверено', confirmed_fraud: 'Подтверждено аналитиком', false_positive: 'Ложная тревога' };
+const reviewLabels: Record<Review, string> = { pending: 'Не проверено', in_review: 'Изучается', step_up: 'Доп. подтверждение', escalated: 'На расследовании', allowed: 'Разрешено аналитиком', confirmed_fraud: 'Подтверждено аналитиком', false_positive: 'Ложная тревога' };
 const blank: Metrics = { transactions: 0, simulated_volume_kzt: 0, high: 0, medium: 0, low: 0, reviewed: 0, disclaimer: '' };
-const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], note: '' } };
+const emptyGraph: GraphData = { nodes: [], edges: [], indicators: { high_fan_in_accounts: [], high_fan_out_accounts: [], rapid_transfer_chains: [], directed_three_node_cycles: [], window_minutes: 1440, note: '' } };
 
 function App() {
   const [key, setKey] = useState(() => sessionStorage.getItem('izqar-api-key') ?? '');
@@ -26,22 +36,25 @@ function App() {
   const [metrics, setMetrics] = useState<Metrics>(blank);
   const [rows, setRows] = useState<Transaction[]>([]);
   const [graph, setGraph] = useState<GraphData>(emptyGraph);
+  const [ibmGraphReport, setIbmGraphReport] = useState<IbmGraphReport | null>(null);
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
-  const [tab, setTab] = useState<'overview' | 'network'>('overview');
+  const [tab, setTab] = useState<'overview' | 'investigations' | 'network' | 'ml'>('overview');
+  const [investigationFocus, setInvestigationFocus] = useState<string | null>(null);
   const [busy, setBusy] = useState<Scenario | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [search, setSearch] = useState('');
 
   const refresh = useCallback(async (secret: string) => {
-    const [m, t, g, ml] = await Promise.all([
+    const [m, t, g, ml, ibmGraph] = await Promise.all([
       request<Metrics>('/api/v1/metrics', secret),
       request<Transaction[]>('/api/v1/transactions?limit=100', secret),
       request<GraphData>('/api/v1/graph', secret),
       request<ModelStatus>('/api/v1/model/status', secret),
+      request<IbmGraphReport>('/api/v1/graph/ibm-aml-report', secret),
     ]);
-    setMetrics(m); setRows(t); setGraph(g); setModel(ml);
+    setMetrics(m); setRows(t); setGraph(g); setModel(ml); setIbmGraphReport(ibmGraph);
     setSelected(previous => previous ? t.find(tx => tx.id === previous.id) ?? null : null);
     setConnected(true);
     setError('');
@@ -94,23 +107,29 @@ function App() {
       <div className="side-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <nav>
         <button className={'nav-item ' + (tab === 'overview' ? 'active' : '')} onClick={() => setTab('overview')}><BarChart3 size={18} /> Обзор системы <ChevronRight size={15} /></button>
+        <button className={'nav-item ' + (tab === 'investigations' ? 'active' : '')} onClick={() => { setInvestigationFocus(null); setTab('investigations'); }}><ShieldAlert size={18} /> Расследования <ChevronRight size={15} /></button>
         <button className={'nav-item ' + (tab === 'network' ? 'active' : '')} onClick={() => setTab('network')}><GitBranch size={18} /> Граф связей <ChevronRight size={15} /></button>
+        <button className={'nav-item ' + (tab === 'ml' ? 'active' : '')} onClick={() => setTab('ml')}><Cpu size={18} /> ML Analytics <ChevronRight size={15} /></button>
       </nav>
       <div className="side-divider" />
       <div className="side-label">СТАТУС СИСТЕМЫ</div>
       <div className="system-row"><span className="status-dot" /> API-сервис <span>Активен</span></div>
       <div className="system-row"><span className="status-dot" /> Rule Engine <span>Активен</span></div>
-      <div className="system-row"><span className={'status-dot ' + (model?.ready ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ready ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.ieee_cis ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ieee_cis ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.paysim ? '' : 'amber')} /> PaySim ML <span>{model?.paysim ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.baf_base ? '' : 'amber')} /> BAF Base ML <span>{model?.baf_base ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.ibm_aml ? '' : 'amber')} /> IBM AML ML <span>{model?.ibm_aml ? 'Обучена' : 'Нет модели'}</span></div>
+      <div className="system-row"><span className={'status-dot ' + (model?.unified_mtl ? '' : 'amber')} /> Unified MTL <span>{model?.unified_mtl ? 'Эксперимент' : 'Нет модели'}</span></div>
       <div className="side-bottom"><div className="mini-shield"><ShieldCheck size={17} /></div><div><strong>Hackathon MVP</strong><span>Локальная симуляция</span></div></div>
     </aside>
 
     <div className="main-frame">
       <header className="topbar">
-        <div className="breadcrumb">Платформа <ChevronRight size={14} /> <strong>{tab === 'overview' ? 'Обзор системы' : 'Граф связей'}</strong></div>
+        <div className="breadcrumb">Платформа <ChevronRight size={14} /> <strong>{tab === 'overview' ? 'Обзор системы' : tab === 'investigations' ? 'Расследования' : tab === 'network' ? 'Граф связей' : 'ML Analytics'}</strong></div>
         <div className="top-actions"><span className="demo-tag"><span className="status-dot" /> DEMO ENVIRONMENT</span><button title="Обновить" className="icon-button" onClick={() => refresh(key).catch((e: Error) => setError(e.message))}><RefreshCcw size={18} /></button><button title="Выйти" className="icon-button" onClick={logout}><LogOut size={18} /></button></div>
       </header>
       <main className="content">
-        <div className="page-heading"><div><div className="eyebrow">IZQAR / FRAUD INTELLIGENCE</div><h1>{tab === 'overview' ? 'Центр мониторинга' : 'Анализ связей'}</h1><p>{tab === 'overview' ? 'Оценка рисков и расследование подозрительных операций.' : 'Исследование структуры переводов между синтетическими счетами.'}</p></div><span className="date-stamp"><Clock size={15} /> Демо-режим · KZT</span></div>
+        <div className="page-heading"><div><div className="eyebrow">IZQAR / FRAUD INTELLIGENCE</div><h1>{tab === 'overview' ? 'Центр мониторинга' : tab === 'investigations' ? 'Рабочее место аналитика' : tab === 'network' ? 'Анализ связей' : 'Аналитика моделей'}</h1><p>{tab === 'overview' ? 'Оценка рисков и расследование подозрительных операций.' : tab === 'investigations' ? 'Очередь, связанные счета, решения и журнал действий.' : tab === 'network' ? 'Исследование структуры переводов между синтетическими счетами.' : 'Фактические тестовые метрики и отдельные ML-прогнозы.'}</p></div><span className="date-stamp"><Clock size={15} /> Демо-режим · KZT</span></div>
         <div className="disclaimer"><CircleHelp size={16} /> <span><strong>Исследовательский прототип.</strong> Все операции синтетические. Оценки в таблице рассчитаны правилами, не ML-моделью. Банк и реальные клиенты не подключены.</span></div>
         {error && <div className="error-banner"><AlertTriangle size={17}/>{error}<button onClick={() => setError('')} aria-label="Закрыть"><X size={15}/></button></div>}
 
@@ -134,7 +153,11 @@ function App() {
                   return <div className="dist-row" key={level}><div className="dist-label"><span>{riskLabels[level]}</span><strong>{count}</strong></div><div className="dist-track"><div className={'dist-fill ' + level} style={{ width: `${width}%` }} /></div></div>;
                 })}
               </div>
-              <div className="engine-info"><Cpu size={20} /><div><strong>{model?.ready ? 'IEEE-CIS модель доступна отдельно' : 'Демонстрационные правила активны'}</strong><span>{model?.ready ? 'Тестовые метрики доступны через API модели.' : 'Обучите IEEE-CIS, чтобы включить отдельный ML endpoint.'}</span></div></div>
+              <div className="engine-info"><Cpu size={20} /><div><strong>Демонстрационные правила активны</strong><span>Оценка операций в таблице рассчитана Rule Engine.</span></div></div>
+              <div className="model-summary"><strong>ML-модели · отдельная оценка</strong>{(['paysim', 'ieee_cis', 'baf_base', 'ibm_aml'] as const).map(kind => {
+                const entry = model?.[kind];
+                return <div key={kind}><span>{({ paysim: 'PaySim', ieee_cis: 'IEEE-CIS', baf_base: 'BAF Base', ibm_aml: 'IBM AML' })[kind]}</span><span>{entry ? `Доступна · ${entry.test_metrics ? `F1 test ${entry.test_metrics.f1.toFixed(3)}` : 'тестовых метрик нет'}` : 'Нет обученной модели'}</span></div>;
+              })}<small>Метрики показываются только из обученных артефактов соответствующего датасета.</small></div>
             </section>
           </div>
           <section className="panel transactions-panel">
@@ -142,11 +165,12 @@ function App() {
             <div className="table-tools"><div className="search"><Search size={16} /><input aria-label="Поиск счёта" value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск счёта или сценария" /></div><div className="filter-row">{(['all','low','medium','high'] as const).map(f => <button className={'filter-btn '+(filter===f?'on':'')} key={f} onClick={() => setFilter(f)}>{f==='all'?'Все':riskLabels[f]}</button>)}</div></div>
             <div className="table-wrap"><table><thead><tr><th>ВРЕМЯ</th><th>ОТПРАВИТЕЛЬ / ПОЛУЧАТЕЛЬ</th><th>СУММА</th><th>РИСК</th><th>РЕШЕНИЕ</th><th /></tr></thead><tbody>{visibleRows.map(tx => <tr key={tx.id} onClick={() => setSelected(tx)} className="transaction-row"><td className="muted">{shortDate(tx.created_at)}</td><td><div className="account-flow">{tx.sender}<ArrowRight size={13}/>{tx.recipient}</div></td><td className="amount-cell">{money(tx.amount)}</td><td><span className={'risk-chip '+tx.risk_level}><i/>{riskLabels[tx.risk_level]} · {tx.risk_score}</span></td><td className="muted">{decisionLabels[tx.decision]}</td><td><ChevronRight size={16}/></td></tr>)}</tbody></table>{!visibleRows.length && <div className="empty-state"><Activity size={25}/><strong>Пока нет операций</strong><span>Запустите сценарий выше, чтобы начать демонстрацию.</span></div>}</div>
           </section>
-        </> : <>
+        </> : tab === 'investigations' ? <Suspense fallback={<LoadingWorkspace />}><InvestigationWorkspace apiKey={key} initialId={investigationFocus} modelStatus={model} onChanged={() => refresh(key)} /></Suspense> : tab === 'network' ? <>
           <div className="graph-summary"><Stat label="Счетов в выборке" value={String(graph.nodes.length)} info="Уникальные узлы" icon={<Fingerprint size={19}/>} /><Stat label="Направлений переводов" value={String(graph.edges.length)} info="Рёбра графа" icon={<GitBranch size={19}/>} /><Stat label="Высокий входящий поток" value={String(graph.indicators.high_fan_in_accounts.length)} info="3+ разных отправителя" icon={<ArrowDownLeft size={19}/>} /><Stat label="Высокий исходящий поток" value={String(graph.indicators.high_fan_out_accounts.length)} info="3+ разных получателя" icon={<ArrowUpRight size={19}/>} /></div>
-          <section className="panel graph-panel"><div className="panel-header"><div><h2>Финансовая сеть</h2><p>Оранжевым отмечены узлы с повышенной входящей или исходящей связностью</p></div><span className="count-tag">NetworkX + Cytoscape</span></div>{graph.nodes.length ? <Graph data={graph} /> : <div className="empty-state big"><GitBranch size={27}/><strong>Нет связей</strong><span>В разделе «Обзор системы» запустите сценарий «Сеть получателей».</span></div>}</section>
+          <section className="panel graph-panel"><div className="panel-header"><div><h2>Финансовая сеть</h2><p>Оранжевым отмечены узлы с повышенной входящей или исходящей связностью</p></div><span className="count-tag">NetworkX + Cytoscape</span></div>{graph.nodes.length ? <Suspense fallback={<LoadingWorkspace />}><Graph data={graph} /></Suspense> : <div className="empty-state big"><GitBranch size={27}/><strong>Нет связей</strong><span>В разделе «Обзор системы» запустите сценарий «Сеть получателей».</span></div>}</section>
           <div className="panel graph-note"><Shield size={20}/><p>{graph.indicators.note || 'Структурные сигналы графа не означают доказанное мошенничество.'}</p></div>
-        </>}
+          <section className="panel"><div className="panel-header"><div><h2>IBM AML · импортированный графовый отчёт</h2><p>Офлайн-анализ HI-Small; в панель передаются только агрегаты без идентификаторов счетов.</p></div><span className="count-tag">{ibmGraphReport?.available ? 'Доступен' : 'Не импортирован'}</span></div>{ibmGraphReport?.available && ibmGraphReport.signal_counts ? <div className="stats-grid"><Stat label="Строк обработано" value={String(ibmGraphReport.rows_analyzed)} info="Ограниченная выборка" icon={<Activity size={19}/>} /><Stat label="Fan-in сигналы" value={String(ibmGraphReport.signal_counts.fan_in)} info="Агрегированно" icon={<ArrowDownLeft size={19}/>} /><Stat label="Fan-out сигналы" value={String(ibmGraphReport.signal_counts.fan_out)} info="Агрегированно" icon={<ArrowUpRight size={19}/>} /><Stat label="Быстрые цепочки" value={String(ibmGraphReport.signal_counts.rapid_transfer_chains)} info="Только прошлая история" icon={<GitBranch size={19}/>} /><Stat label="Направленные циклы" value={String(ibmGraphReport.signal_counts.directed_three_node_cycles)} info="Трёхузловые · агрегированно" icon={<GitBranch size={19}/>} /></div> : <div className="empty-state"><Activity size={25}/><strong>Отчёт IBM AML пока не установлен</strong><span>{ibmGraphReport?.warning ?? 'Статус отчёта загружается.'}</span></div>}<div className="drawer-disclaimer">{ibmGraphReport?.warning ?? 'Структурные сигналы — повод для расследования, не доказательство отмывания.'}</div></section>
+        </> : <Suspense fallback={<LoadingWorkspace />}><MLAnalytics status={model} apiKey={key} /></Suspense>}
         <footer>IZQAR · Intelligent Fraud Prevention Platform <span>Research prototype v0.1.0</span></footer>
       </main>
     </div>
@@ -155,7 +179,7 @@ function App() {
       <div className="drawer-data"><div><span>Сумма</span><strong>{money(selected.amount)}</strong></div><div><span>Отправитель</span><strong>{selected.sender}</strong></div><div><span>Получатель</span><strong>{selected.recipient}</strong></div><div><span>Дата операции</span><strong>{shortDate(selected.created_at)}</strong></div><div><span>Решение системы</span><strong>{decisionLabels[selected.decision]}</strong></div><div><span>Статус проверки</span><strong>{reviewLabels[selected.review_state]}</strong></div></div>
       <h3>Почему система присвоила этот риск</h3><div className="reasons">{selected.reasons.map((r, i)=><div key={i}><AlertTriangle size={16}/>{r}</div>)}</div>
       <div className="drawer-disclaimer">Скор не является статистически откалиброванной вероятностью мошенничества. Решение демонстрационное.</div>
-      <h3>Решение аналитика</h3><div className="review-actions"><button onClick={() => updateReview(selected, 'confirmed_fraud')}><ShieldAlert size={16}/> Подтвердить риск</button><button onClick={() => updateReview(selected, 'false_positive')}><Check size={16}/> Ложная тревога</button></div>
+      <h3>Решение аналитика</h3><div className="review-actions"><button onClick={() => { setInvestigationFocus(selected.id); setSelected(null); setTab('investigations'); }}><ShieldAlert size={16}/> Открыть расследование</button><button onClick={() => updateReview(selected, 'false_positive')}><Check size={16}/> Ложная тревога</button></div>
     </aside></div>}
   </div>;
 }
