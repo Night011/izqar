@@ -38,6 +38,22 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 - Threshold drift across months: 0.939 (m3) → 0.935 (m4) → 0.913 (m5) with fraud-rate 0.92%→1.18%; fixed threshold not stable — budget-aware per-month recalibration is appropriate.
 - Kaggle kernel QUEUED ~50+ min without diagnostics; local fallback: isolated venv (temp) with lightgbm+catboost for identical folds.
 
+## Stage 3 experiment ledger (identical folds, months 3/4/5, 1500-400 iters)
+
+| Config | Mean PR-AUC | Folds | Verdict |
+|---|---|---|---|
+| xgboost v1 (280-config, depth 4) | 0.1554/0.1565 | 0.140/0.158/0.168 | reference best so far |
+| xgboost v2 | 0.1538/0.1549 | 0.139/0.156/0.166 | rejected (-0.002) |
+| xgboost max_depth=6 | 0.1517 | 0.136/0.155/0.164 | rejected |
+| xgboost lr=0.03, 800 trees | 0.1558 | 0.140/0.159/0.168 | rejected (~noise) |
+| catboost (OHE) v1 / v2 | 0.1572 / 0.1578 | ~0.144/0.161/0.167 | parity with XGB (+0.002) |
+| catboost native (no OHE) v1 / v2 | 0.1556 / 0.1562 | 0.143/0.162/0.167 | parity (no gain vs OHE) |
+| lightgbm v1/v2 (SPW or is_unbalance) | 0.052 | 0.048/0.052/0.057 | BROKEN arm — early-stops at iter 1; even tuned (is_unbalance, depth=-1, leaves=31) PR-AUC 0.053. Dropped, documented as LightGBM failing on this workload/config, not on LightGBM per se |
+| velocity headroom (v2 + 7 aggs) | 0.1737 | 0.154/0.178/0.189 | NOT eligible (Stage 4) |
+| XGB+CatBoost rank-average ensemble | pending (PID 19752) | — | — |
+
+Kaggle GPU and local CPU agree on catboost/lightgbm parity. No config beats v1-XGBoost significantly; current optimum = XGBoost v1 family within noise.
+
 ## Log
 
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
