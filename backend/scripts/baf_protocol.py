@@ -128,11 +128,51 @@ def evaluate_external(y_external, external_scores, threshold,
     return result
 
 
-def mean_external_metrics(fold_reports: list[dict]) -> dict:
-    """Average numeric external metrics across folds (post-hoc views excluded)."""
+def budget_alert_rate(y_calibration, calibration_scores,
+                      max_false_alerts_per_10000: float | None) -> float:
+    """Share of a batch flagged by the calibration budget threshold.
+
+    The rate is a property of the score distribution, so it can be replayed on
+    a later batch without labels: production keeps a rolling reference window
+    and flags the same top share of today's applications.
+    """
+    threshold, _ = select_operating_point(y_calibration, calibration_scores,
+                                          max_false_alerts_per_10000)
+    scores = np.asarray(calibration_scores, dtype=np.float64)
+    return float(np.mean(scores >= threshold))
+
+
+def quantile_cutoff(scores, alert_rate: float) -> float:
+    """Score cutoff flagging the top ``alert_rate`` share of a batch. No labels."""
+    if not 0.0 < alert_rate <= 1.0:
+        raise ValueError('alert_rate must be in (0, 1]')
+    scores = np.asarray(scores, dtype=np.float64)
+    count = min(max(int(np.ceil(alert_rate * len(scores))), 1), len(scores))
+    return float(np.partition(scores, len(scores) - count)[len(scores) - count])
+
+
+def evaluate_external_at_capacity(y_external, external_scores, alert_rate: float) -> dict:
+    """Frozen-capacity operating point: fixed alert volume, threshold from scores only."""
+    from train_ieee import metrics, ranking_metrics
+
+    cutoff = quantile_cutoff(external_scores, alert_rate)
+    result = metrics(y_external, external_scores, cutoff)
+    result.update(ranking_metrics(y_external, external_scores))
+    result['threshold'] = round(cutoff, 6)
+    result['threshold_source'] = 'frozen alert rate replayed on external scores (no labels)'
+    result['frozen_alert_rate'] = round(float(alert_rate), 6)
+    result['achieved_alert_rate'] = round(float(np.mean(np.asarray(external_scores) >= cutoff)), 6)
+    return result
+
+
+def mean_external_metrics(fold_reports: list[dict], key: str = 'external_metrics') -> dict:
+    """Average numeric metrics across folds (post-hoc views excluded)."""
     if not fold_reports:
         return {}
-    scalar_keys = [key for key, value in fold_reports[0]['external_metrics'].items()
+    reports = [fold[key] for fold in fold_reports if key in fold]
+    if not reports:
+        return {}
+    scalar_keys = [name for name, value in reports[0].items()
                    if isinstance(value, (int, float)) and not isinstance(value, bool)]
-    return {key: round(float(np.mean([fold['external_metrics'][key] for fold in fold_reports])), 6)
-            for key in scalar_keys}
+    return {name: round(float(np.mean([report[name] for report in reports])), 6)
+            for name in scalar_keys}

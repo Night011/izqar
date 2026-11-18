@@ -48,7 +48,10 @@ NUMERIC_V2 = NUMERIC + ENGINEERED_NUMERIC
 CATEGORICAL = ['payment_type', 'employment_status', 'housing_status', 'source', 'device_os']
 FEATURES = NUMERIC + CATEGORICAL
 FEATURES_V2 = NUMERIC_V2 + CATEGORICAL
-FEATURE_SETS = {'v1': (NUMERIC, FEATURES), 'v2': (NUMERIC_V2, FEATURES_V2)}
+VELOCITY = ['zip_count_4w', 'velocity_6h', 'velocity_24h', 'velocity_4w',
+            'bank_branch_count_8w', 'date_of_birth_distinct_emails_4w', 'device_distinct_emails_8w']
+FEATURE_SETS = {'v1': (NUMERIC, FEATURES), 'v2': (NUMERIC_V2, FEATURES_V2),
+                'v1v': (NUMERIC + VELOCITY, NUMERIC + VELOCITY + CATEGORICAL)}
 REQUIRED = set(FEATURES) | {'fraud_bool', 'month'}
 SENTINEL_MISSING = ['prev_address_months_count', 'current_address_months_count',
                     'bank_months_count', 'session_length_in_minutes']
@@ -76,17 +79,22 @@ def add_engineered(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def read_base(path: Path) -> pd.DataFrame:
+def read_base(path: Path, extra_columns=()) -> pd.DataFrame:
     if path.name.lower() != 'base.csv':
         raise ValueError('Use only the BAF Base.csv variant; do not mix suite variants')
     columns = set(pd.read_csv(path, nrows=0).columns)
     missing = REQUIRED - columns
     if missing:
         raise ValueError(f'Missing BAF Base columns: {sorted(missing)}')
+    wanted = set(REQUIRED) | set(extra_columns)
+    absent = wanted - columns
+    if absent:
+        raise ValueError(f'Missing requested BAF columns: {sorted(absent)}')
     dtypes = {name: 'float32' for name in NUMERIC}
+    dtypes.update({name: 'float32' for name in extra_columns})
     dtypes.update({name: 'category' for name in CATEGORICAL})
     dtypes.update({'fraud_bool': 'int8', 'month': 'int8'})
-    data = pd.read_csv(path, usecols=sorted(REQUIRED), dtype=dtypes)
+    data = pd.read_csv(path, usecols=sorted(wanted), dtype=dtypes)
     if not data.fraud_bool.isin([0, 1]).all():
         raise ValueError('fraud_bool must be binary')
     if data.month.isna().any() or (data.month < 0).any():

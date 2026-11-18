@@ -13,7 +13,8 @@ import pytest
 
 pd = pytest.importorskip('pandas')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from baf_protocol import (calibrated_folds, evaluate_external, infold_folds,  # noqa: E402
+from baf_protocol import (budget_alert_rate, calibrated_folds, evaluate_external,  # noqa: E402
+                          evaluate_external_at_capacity, infold_folds, quantile_cutoff,
                           rows_fingerprint, select_operating_point)
 from train_baf import CATEGORICAL, NUMERIC, train  # noqa: E402
 
@@ -59,6 +60,31 @@ def test_threshold_comes_from_calibration_and_is_frozen_on_external():
     assert external['threshold_source'] == 'frozen from calibration month'
     assert external['confusion_matrix_tn_fp_fn_tp'][1] == expected_fp
     assert set(external['post_hoc_budget_diagnostics']) == {'50', '75', '100'}
+
+
+def test_capacity_policy_replays_alert_rate_without_labels():
+    rng = np.random.default_rng(1)
+    y_calibration = (rng.random(4000) < 0.05).astype(int)
+    scores_calibration = np.clip(0.8 * y_calibration + rng.random(4000) * 0.6, 0, 1)
+    rate = budget_alert_rate(y_calibration, scores_calibration, 50)
+    assert 0 < rate < 1
+
+    # Same score scale, more benign traffic: the policy flags the same share,
+    # so the false-alert count is what changes, not the cutoff rule.
+    y_external = (rng.random(4000) < 0.05).astype(int)
+    scores_external = np.clip(0.8 * y_external + rng.random(4000) * 0.6, 0, 1)
+    external = evaluate_external_at_capacity(y_external, scores_external, rate)
+    assert external['frozen_alert_rate'] == pytest.approx(rate, abs=1e-6)
+    assert external['achieved_alert_rate'] == pytest.approx(rate, abs=0.002)
+    assert external['threshold_source'].startswith('frozen alert rate')
+
+
+def test_quantile_cutoff_uses_scores_only():
+    scores = np.arange(1000, dtype=float)
+    cutoff = quantile_cutoff(scores, 0.1)
+    assert int(np.sum(scores >= cutoff)) == 100
+    with pytest.raises(ValueError):
+        quantile_cutoff(scores, 0.0)
 
 
 def test_rows_fingerprint_tracks_the_exact_rows():

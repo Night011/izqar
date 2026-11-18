@@ -109,6 +109,29 @@ python backend/scripts/research_baf_algorithms.py --data backend/data/baf/Base.c
 
 Each fold report carries train/calibration/external months, row counts, per-period row-index sha256, best iteration, fit seconds, selected threshold, calibration sweep and full confusion matrix.
 
+## Stage 9 — velocity admissibility, fixed-capacity operating point, pre-deployment refit
+
+Three questions were still open after Stage 8. All three are now measured on the same calibrated folds (train < calibration < external, threshold/rounds frozen; `docs/baf_policy_velocity_v1.metrics.json`).
+
+**1. Are the seven blocked "velocity" columns admissible?** Yes in principle. The official BAF datasheet (`feedzai/bank-account-fraud/documents/datasheet.pdf`, p.2) defines them as trailing-window counts of *prior applications*: `zip_count_4w` = applications in the same ZIP in the last 4 weeks; `velocity_6h`/`24h`/`4w` = average applications per hour over the last 6h/24h/4w; `bank_branch_count_8w`; `date_of_birth_distinct_emails_4w`; `device_distinct_emails_8w`. They are pre-decision business aggregates, not outcomes, so they carry no label leakage. What is still missing is not permission but plumbing: IZQAR must compute the same seven counters over its own application stream (7 rolling-window aggregations keyed by ZIP / branch / DOB / device).
+
+**2. Does that headroom survive the honest protocol?** Yes, and it is the only arm that does.
+
+| Arm | Mean PR-AUC | PR-AUC m3/m4/m5 | Recall @capacity m3/m4/m5 | FP/10k @capacity |
+|---|---|---|---|---|
+| xgboost v1 | 0.1529 | 0.1372/0.1565/0.1652 | 0.229/0.231/0.260 | 98/96/96 |
+| catboost v1 | 0.1558 | 0.1392/0.1623/0.1657 | 0.237/0.227/0.259 | 98/96/96 |
+| **xgboost v1v** | **0.1708** (+0.0179) | 0.1501/0.1752/0.1870 | 0.251/0.253/0.279 (+0.022/+0.022/+0.019) | 97/94/95 |
+| **catboost v1v** | **0.1732** (+0.0174) | 0.1573/0.1731/0.1891 | 0.254/0.247/0.279 | 98/95/97 |
+
+The gain holds on every fold (+0.011…+0.023) and is ~+10% relative recall at the same false-alert budget. CatBoost's +0.002 lead over XGBoost is inside fold noise and costs 2–3× fit time; XGBoost keeps the tie-break. The earlier 0.1737 estimate (optimistic in-fold threshold) was not inflated by the feature class — it reproduces at 0.1708 under the corrected protocol.
+
+**3. Can the 100 FP/10k budget be met without labels?** Yes, by freezing an alert *rate* instead of a probability. The threshold chosen on the calibration month is translated into the share of that batch it flags (~1.19–1.26%), and the same top share is flagged on the external month. This uses only the score distribution, never external labels, and is the operational equivalent of ranking today's applications and reviewing the top q%. Measured: FP/10k 94–98 on all folds (a frozen probability threshold gave 51–233), and recall lands within **0.0007–0.0069** of the oracle threshold that *is* allowed to fit the external labels at the same budget. On m5 it also gains recall (0.260 vs 0.192) because it spends the budget instead of under-alerting. Cost: serving needs a rolling window of recent scores, since the API scores one request at a time today.
+
+**4. Pre-deployment refit.** Refitting on train+calibration with the round count frozen (calibration then contributes rows, not choices) is worth +0.0017 (XGB) / +0.0019 (Cat) mean PR-AUC, largest on the data-starved m3 fold (+0.0028/+0.0020). Free improvement, no new features, no external data.
+
+Decision: nothing is promoted to production. `v1v` becomes the documented best candidate and the reference for future work, conditional on the seven streaming counters; the capacity policy becomes the recommended serving rule, conditional on a rolling score window. The production artifact (`baf_base_v1_portable`) and its fixed-threshold contract are untouched and remain the rollback point.
+
 ## Log
 
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).

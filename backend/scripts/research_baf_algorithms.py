@@ -13,6 +13,14 @@ PR-AUC 0.052 was a one-tree model, not a LightGBM limitation. PR-AUC on the
 calibration month is now the single selection rule for every algorithm.
 
 No artifact is written; the penultimate and final months are never touched.
+
+Each fold also records a second operating point: the calibration threshold is
+translated into the share of the batch it flags, and that alert rate is
+replayed on the external month (``external_metrics_capacity``). Replaying a
+share uses only the score distribution, so it stays label-free. With
+``--refit-on-calibration`` the model is additionally refitted on
+train+calibration with the round count frozen, which models a pre-deployment
+retrain without letting the calibration month drive any choice.
 """
 from __future__ import annotations
 
@@ -25,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import average_precision_score
@@ -32,9 +41,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from baf_protocol import (calibrated_folds, evaluate_external, mean_external_metrics,  # noqa: E402
+from baf_protocol import (budget_alert_rate, calibrated_folds, evaluate_external,  # noqa: E402
+                          evaluate_external_at_capacity, mean_external_metrics,
                           rows_fingerprint, select_operating_point)
-from train_baf import CATEGORICAL, FEATURE_SETS, add_engineered, read_base, split_months  # noqa: E402
+from train_baf import (CATEGORICAL, FEATURE_SETS, VELOCITY, add_engineered, read_base,  # noqa: E402
+                       split_months)
 from train_ieee import file_provenance  # noqa: E402
 
 ROUND_GRID_STEP = 25
@@ -180,7 +191,7 @@ def _select_rounds(y_calibration, matrix, predict, max_rounds: int):
 
 
 def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
-                  numeric_cols, *, seed, device, max_rounds, budget) -> dict:
+                  numeric_cols, *, seed, device, max_rounds, budget, refit=False) -> dict:
     started = time.perf_counter()
     members, combination = build_members(algo, fit_rows, feature_cols, numeric_cols,
                                          seed=seed, device=device, max_rounds=max_rounds)
@@ -202,17 +213,43 @@ def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
         matrices['calibration'].append(member['predict'](x_calibration, chosen))
         matrices['external'].append(member['predict'](x_external, chosen))
 
-    threshold, selection = select_operating_point(
-        y_calibration, _combine(matrices['calibration'], combination), budget)
-    external = evaluate_external(y_external, _combine(matrices['external'], combination), threshold)
-    return {
+    calibration_scores = _combine(matrices['calibration'], combination)
+    external_scores = _combine(matrices['external'], combination)
+    threshold, selection = select_operating_point(y_calibration, calibration_scores, budget)
+    alert_rate = budget_alert_rate(y_calibration, calibration_scores, budget)
+    report = {
         'rounds': rounds, 'fit_seconds': round(float(fit_seconds), 3),
         'selected_threshold': round(float(threshold), 6),
         'selection': selection, 'calibration': calibration,
         'params': {member['name']: member['params'] for member in members},
         'combination': combination,
-        'external_metrics': external,
+        'capacity_alert_rate': round(float(alert_rate), 6),
+        'external_metrics': evaluate_external(y_external, external_scores, threshold),
+        'external_metrics_capacity': evaluate_external_at_capacity(
+            y_external, external_scores, alert_rate),
     }
+
+    if refit:
+        # Deploy-before-external retrain: rounds stay frozen, so the calibration
+        # month only contributes rows (it never re-selects anything).
+        if combination is not None:
+            raise ValueError('refit is defined for single-model arms only')
+        refit_started = time.perf_counter()
+        chosen = rounds[members[0]['name']]
+        refit_members, _ = build_members(algo, pd.concat([fit_rows, calibration_rows]),
+                                         feature_cols, numeric_cols, seed=seed,
+                                         device=device, max_rounds=chosen)
+        member = refit_members[0]
+        refit_scores = member['predict'](member['transform'](external_rows), chosen)
+        report['refit'] = {'rounds': chosen, 'fit_seconds': round(float(time.perf_counter() - refit_started), 3),
+                           'train_rows': int(len(fit_rows) + len(calibration_rows)),
+                           'note': 'model refitted on train+calibration with frozen rounds; '
+                                   'operating point replayed as the calibration alert rate'}
+        report['external_metrics_refit_capacity'] = evaluate_external_at_capacity(
+            y_external, refit_scores, alert_rate)
+        report['external_metrics_refit_capacity']['threshold_source'] = (
+            'refit model, frozen alert rate replayed on external scores (no labels)')
+    return report
 
 
 def main():
@@ -222,13 +259,16 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--algos', nargs='+',
                         default=['xgboost', 'catboost', 'catboost_native', 'lightgbm', 'lightgbm_reg', 'ensemble'])
-    parser.add_argument('--feature-sets', nargs='+', default=['v1'], choices=['v1', 'v2'])
+    parser.add_argument('--feature-sets', nargs='+', default=['v1'], choices=['v1', 'v2', 'v1v'])
     parser.add_argument('--max-rounds', type=int, default=400)
     parser.add_argument('--device', default='cpu')
+    parser.add_argument('--refit-on-calibration', action='store_true',
+                        help='also score a model refitted on train+calibration with frozen rounds')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100.0)
     args = parser.parse_args()
 
-    data = add_engineered(read_base(args.data))
+    extra = VELOCITY if 'v1v' in args.feature_sets else ()
+    data = add_engineered(read_base(args.data, extra))
     parts, boundaries = split_months(data)
     train_rows = parts[0]
     months = sorted(train_rows.month.unique().tolist())
@@ -246,7 +286,7 @@ def main():
                 evaluation = evaluate_fold(
                     algo, fit_rows, calibration_rows, external_rows, feature_cols,
                     numeric_cols, seed=args.seed, device=args.device, max_rounds=args.max_rounds,
-                    budget=args.max_false_alerts_per_10000)
+                    budget=args.max_false_alerts_per_10000, refit=args.refit_on_calibration)
                 fold_reports.append({
                     'train_months': fold['train_months'],
                     'calibration_month': fold['calibration_month'],
@@ -264,7 +304,22 @@ def main():
                       f"F1 {external['f1']:.6f} "
                       f"FP/10k {external['false_alerts_per_10000_operations']:.1f} "
                       f"rounds {evaluation['rounds']} ({evaluation['fit_seconds']:.1f}s)", flush=True)
-            results[key] = {'folds': fold_reports, 'mean_metrics': mean_external_metrics(fold_reports)}
+                capacity = evaluation['external_metrics_capacity']
+                line = (f"{key} fold external {fold['external_month']} capacity: "
+                        f"alert rate {evaluation['capacity_alert_rate']:.4f} "
+                        f"recall {capacity['recall']:.4f} "
+                        f"FP/10k {capacity['false_alerts_per_10000_operations']:.1f}")
+                refit = evaluation.get('external_metrics_refit_capacity')
+                if refit:
+                    line += (f" | refit: PR-AUC {refit['average_precision_pr_auc']:.6f} "
+                             f"recall {refit['recall']:.4f} "
+                             f"FP/10k {refit['false_alerts_per_10000_operations']:.1f}")
+                print(line, flush=True)
+            results[key] = {'folds': fold_reports, 'mean_metrics': mean_external_metrics(fold_reports),
+                            'mean_metrics_capacity': mean_external_metrics(
+                                fold_reports, 'external_metrics_capacity'),
+                            'mean_metrics_refit_capacity': mean_external_metrics(
+                                fold_reports, 'external_metrics_refit_capacity')}
             print(key, 'mean PR-AUC', results[key]['mean_metrics']['average_precision_pr_auc'], flush=True)
 
     report = {'mode': 'research-algorithms-calibrated', 'protocol': 'calibrated',
