@@ -56,6 +56,28 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 - 2026-11-18 (late): final verdict recorded. BAF experimental endpoint `/api/v1/model/baf-candidate` added (read-only; metrics of research folds; 404 when absent). 147 tests passed. Ensemble NOT adopted (P@100 flat 0.5 vs XGB 0.46/0.50/0.50, within noise).
 - Recommendation: ship nothing new; document ceiling. Any further gains would need the verified streaming velocity pipeline (excluded by Stage 4) or stronger raw signals.
 
+## Stage 7 — corrected evaluation protocol (validity fix)
+
+Problem: `threshold_analysis(fold_valid.fraud_bool, scores, 100)` chose the operating point on the same fold it reported, so FP/10k ≈ 99.6 was guaranteed by construction. Same fold also drove early stopping.
+
+Protocol (`backend/scripts/baf_protocol.py`, `--protocol calibrated`): for external month *m*, fit on months < *m*−1, choose **both** the round count and the threshold on month *m*−1, score month *m* once with both frozen. `--protocol infold` reproduces the old layout and is labelled optimistic in the artifact. Months 6/7 never enter selection. Regression tests: `backend/tests/test_baf_protocol.py` (8 tests; **155 backend tests pass**; CI remains blocked by the GitHub Actions billing lock).
+
+XGBoost v1, calibrated (`docs/baf_calibrated_v1.metrics.json`):
+
+| External fold | Train / cal | PR-AUC | ROC | P@100 | P@1000 | Recall | F1 | FP/10k (frozen) | FP/10k on cal | Rounds |
+|---|---|---|---|---|---|---|---|---|---|---|
+| m3 | m0–1 / m2 | 0.137190 | 0.9043 | 0.45 | 0.226 | 0.3621 | 0.2016 | **205.7** | 99.87 | 304 |
+| m4 | m0–2 / m3 | 0.156176 | 0.8998 | 0.46 | 0.260 | 0.2417 | 0.2190 | **109.9** | 99.18 | 264 |
+| m5 | m0–3 / m4 | 0.166224 | 0.8853 | 0.48 | 0.298 | 0.1906 | 0.2350 | 51.0 | 99.77 | 228 |
+| mean | | 0.153197 | 0.8965 | 0.463 | 0.261 | 0.2648 | 0.2185 | **122.2** | 99.6 | |
+
+Comparison with the in-fold protocol (old, optimistic): mean PR-AUC 0.1565, F1 0.2266, FP/10k 99.6.
+
+- Ranking quality is unchanged: P@100 0.45/0.46/0.48 and P@1000 0.226/0.260/0.298 match the old 0.46/0.50/0.50 and 0.230/0.257/0.291 within noise. The old optimism was **entirely in the operating point**, not in the model.
+- With a genuinely pre-registered threshold the 100 FP/10k budget is breached on 2 of 3 folds (205.7, 109.9) while calibration itself is always ≈99.7 — the score distribution shifts between months (fraud rate 0.92%→1.18%).
+- Post-hoc recall at 50/75/100 FP/10k on the external folds (diagnostic; recalibrating per period needs labels): 0.159/0.197/0.233 · 0.168/0.196/0.236 · 0.190/0.238/0.266.
+- Fold m3 now trains on 260k rows instead of 397k (the extra month became calibration), so its PR-AUC is slightly lower; this is the honest cost of the protocol.
+
 ## Log
 
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
