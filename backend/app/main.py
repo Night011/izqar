@@ -85,6 +85,19 @@ def metrics(db: Session = Depends(get_db)):
 def graph(limit: int = Query(default=500, ge=1, le=1000), db: Session = Depends(get_db)):
     return build_graph(db, limit)
 
+@app.get('/api/v1/model/ieee-candidate', dependencies=[Depends(require_key)])
+def ieee_candidate():
+    from .ml import load_ieee_candidate_metrics
+    metrics = load_ieee_candidate_metrics()
+    if metrics is None:
+        raise HTTPException(status_code=404, detail='IEEE-CIS экспериментальная модель не найдена; обучите её через backend/scripts/train_ieee_v3.py')
+    return {'model_version': metrics.get('model_version'), 'experimental': True,
+            'test_metrics': metrics.get('test_metrics', {}),
+            'validation_metrics': metrics.get('validation_metrics', {}),
+            'threshold': metrics.get('threshold'),
+            'split_method': metrics.get('split_method'),
+            'warning': metrics.get('warning')}
+
 @app.get('/api/v1/model/status', dependencies=[Depends(require_key)])
 def model_status():
     artifact = load_model()

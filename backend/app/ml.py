@@ -14,6 +14,33 @@ def load_model():
     return artifact
 
 
+def load_ieee_candidate_metrics():
+    """Return IEEE-CIS experimental candidate metrics if a metrics file exists, else None.
+
+    Reads (in order) IZQAR_IEEE_CANDIDATE_METRICS, then the default experiment locations.
+    Never loads the model itself; purely informational for ML Analytics.
+    """
+    import json
+    import os
+
+    from .config import BACKEND_ROOT
+    candidates = [
+        os.environ.get('IZQAR_IEEE_CANDIDATE_METRICS'),
+        BACKEND_ROOT / 'models' / 'experiments' / 'ieee_v3_candidate.metrics.json',
+        BACKEND_ROOT.parent / 'models' / 'experiments' / 'ieee_v3_candidate.metrics.json',
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.is_file():
+            try:
+                return json.loads(path.read_text(encoding='utf-8'))
+            except (ValueError, OSError):
+                return None
+    return None
+
+
 def predict_ieee(features: dict):
     artifact = load_model()
     if artifact is None:
