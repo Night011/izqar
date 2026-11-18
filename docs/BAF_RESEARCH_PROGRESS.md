@@ -132,6 +132,26 @@ The gain holds on every fold (+0.011…+0.023) and is ~+10% relative recall at t
 
 Decision: nothing is promoted to production. `v1v` becomes the documented best candidate and the reference for future work, conditional on the seven streaming counters; the capacity policy becomes the recommended serving rule, conditional on a rolling score window. The production artifact (`baf_base_v1_portable`) and its fixed-threshold contract are untouched and remain the rollback point.
 
+## Stage 10 — is the ceiling drift or signal? (`research_baf_ceiling.py`)
+
+Each research month was split in half at random: fit on one half, score the other. This removes month-to-month drift entirely (same period, same batch) and leaves only the within-period signal. Fixed 300 rounds, no early stopping, no threshold; PR-AUC and P@1000 are threshold-free.
+
+| External month | Train rows (half) | Same-month PR-AUC v1 | v1v | Cross-month PR-AUC v1v |
+|---|---|---|---|---|
+| m3 | 75,468 | 0.1185 | 0.1365 | 0.1501 |
+| m4 | 63,845 | 0.1374 | 0.1449 | 0.1752 |
+| m5 | 59,661 | 0.1494 | 0.1617 | 0.1870 |
+
+Same-month is **worse** than cross-month on every month, by 0.014–0.030, despite zero drift. So the binding constraint is not drift; it is training volume. Confirmed by a learning curve on the m4 fold (v1v, train region subsampled, 300 rounds):
+
+| Train rows | PR-AUC on m4 |
+|---|---|
+| 99,259 (25%) | 0.1384 |
+| 198,519 (50%) | 0.1718 |
+| 397,039 (100%) | 0.1755 |
+
+The curve is steep up to ~200k rows and then flattens (+0.004 for the second doubling). The full-history models (260k–600k rows) therefore sit within ~0.004 of the practical plateau, and m3's weakness is a volume effect (two months of history) rather than a drift or tuning defect. Practical consequence: further tuning on this dataset has little room; the two levers that did move the number are the seven velocity columns (+0.018 PR-AUC, available once the streaming counters exist) and, marginally, the pre-deployment refit.
+
 ## Log
 
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).

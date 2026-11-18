@@ -1,0 +1,75 @@
+{
+  "seed": 42,
+  "rounds": 300,
+  "months": {
+    "3": {
+      "rows_a": 75468,
+      "rows_b": 75468,
+      "fraud_rate_a": 0.009726,
+      "fraud_rate_b": 0.008719,
+      "v1": {
+        "pr_auc": 0.118526,
+        "precision_at_100": 0.31,
+        "precision_at_1000": 0.16
+      },
+      "v1v": {
+        "pr_auc": 0.136493,
+        "precision_at_100": 0.34,
+        "precision_at_1000": 0.168
+      }
+    },
+    "4": {
+      "rows_a": 63845,
+      "rows_b": 63846,
+      "fraud_rate_a": 0.011606,
+      "fraud_rate_b": 0.011136,
+      "v1": {
+        "pr_auc": 0.137413,
+        "precision_at_100": 0.36,
+        "precision_at_1000": 0.173
+      },
+      "v1v": {
+        "pr_auc": 0.144949,
+        "precision_at_100": 0.37,
+        "precision_at_1000": 0.19
+      }
+    },
+    "5": {
+      "rows_a": 59661,
+      "rows_b": 59662,
+      "fraud_rate_a": 0.011733,
+      "fraud_rate_b": 0.011917,
+      "v1": {
+        "pr_auc": 0.14941,
+        "precision_at_100": 0.47,
+        "precision_at_1000": 0.186
+      },
+      "v1v": {
+        "pr_auc": 0.16166,
+        "precision_at_100": 0.48,
+        "precision_at_1000": 0.188
+      }
+    }
+  },
+  "learning_curve": {
+    "external_month": 4,
+    "pool_rows": 397039,
+    "points": [
+      {
+        "fraction": 0.25,
+        "rows": 99259,
+        "pr_auc": 0.138406
+      },
+      {
+        "fraction": 0.5,
+        "rows": 198519,
+        "pr_auc": 0.171757
+      },
+      {
+        "fraction": 1.0,
+        "rows": 397039,
+        "pr_auc": 0.175543
+      }
+    ]
+  }
+}
