@@ -55,24 +55,57 @@ def make_model(algo, spw, seed, device='cuda'):
     raise ValueError(algo)
 
 
-def run_fold(algo, feats, train_rows, fold_valid, features, seed, device='cuda'):
+def run_fold(algo, feats, train_rows, fold_valid, features, seed, device='cpu'):
     numeric_cols = FEATURE_SETS[feats][0]
-    pre = make_preprocess(numeric_cols)
     y_fold = train_rows.fraud_bool.astype('int8')
     pos = int(y_fold.sum())
     spw = (len(y_fold) - pos) / pos
-    built = make_model(algo, spw, seed, device)
-    model, callbacks = (built, None) if algo != 'lightgbm' else built
-    x_tr = pre.fit_transform(train_rows[features])
-    x_va = pre.transform(fold_valid[features])
-    if algo == 'lightgbm':
+    if algo == 'catboost_native':
+        # Native categorical handling: no OHE; numeric medians; raw category strings.
+        train = train_rows[features].copy()
+        valid = fold_valid[features].copy()
+        for col in numeric_cols:
+            med = train[col].median()
+            train[col] = train[col].fillna(med)
+            valid[col] = valid[col].fillna(med)
+        for col in CATEGORICAL:
+            train[col] = train[col].astype('string').fillna('__missing__').astype(str)
+            valid[col] = valid[col].astype('string').fillna('__missing__').astype(str)
+        from catboost import CatBoostClassifier
+        model = CatBoostClassifier(iterations=400, depth=4, learning_rate=.06,
+                                   loss_function='Logloss', eval_metric='PRAUC',
+                                   class_weights=[1.0, float(spw)], random_state=seed,
+                                   od_type='Iter', od_wait=40, verbose=False,
+                                   cat_features=list(range(len(numeric_cols), len(numeric_cols) + len(CATEGORICAL))),
+                                   task_type=('GPU' if device == 'cuda' else 'CPU'))
+        model.fit(train, y_fold, eval_set=(valid, fold_valid.fraud_bool.astype('int8')), verbose=False)
+        scores = model.predict_proba(valid)[:, 1]
+    elif algo == 'lightgbm_fix':
+        pre = make_preprocess(numeric_cols)
+        from lightgbm import LGBMClassifier, early_stopping, log_evaluation
+        model = LGBMClassifier(n_estimators=400, max_depth=-1, num_leaves=31, learning_rate=.06,
+                               subsample=.85, colsample_bytree=.85, reg_lambda=4,
+                               is_unbalance=True, random_state=seed, n_jobs=min(4, os.cpu_count() or 1))
+        x_tr = pre.fit_transform(train_rows[features])
+        x_va = pre.transform(fold_valid[features])
         model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))],
-                  eval_metric='aucpr', callbacks=callbacks)
-    elif algo == 'catboost':
-        model.fit(x_tr, y_fold, eval_set=(x_va, fold_valid.fraud_bool.astype('int8')), verbose=False)
+                  eval_metric='average_precision',
+                  callbacks=[early_stopping(40, verbose=False), log_evaluation(0)])
+        scores = model.predict_proba(x_va)[:, 1]
     else:
-        model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))], verbose=False)
-    scores = model.predict_proba(x_va)[:, 1]
+        pre = make_preprocess(numeric_cols)
+        built = make_model(algo, spw, seed, device)
+        model, callbacks = (built, None) if algo != 'lightgbm' else built
+        x_tr = pre.fit_transform(train_rows[features])
+        x_va = pre.transform(fold_valid[features])
+        if algo == 'lightgbm':
+            model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))],
+                      eval_metric='aucpr', callbacks=callbacks)
+        elif algo == 'catboost':
+            model.fit(x_tr, y_fold, eval_set=(x_va, fold_valid.fraud_bool.astype('int8')), verbose=False)
+        else:
+            model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))], verbose=False)
+        scores = model.predict_proba(x_va)[:, 1]
     threshold, _ = threshold_analysis(fold_valid.fraud_bool, scores, 100)
     m = metrics(fold_valid.fraud_bool, scores, threshold)
     m.update(ranking_metrics(fold_valid.fraud_bool, scores))
