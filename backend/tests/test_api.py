@@ -1,3 +1,6 @@
+import asyncio
+
+
 def test_health_and_access_control(client, auth):
     assert client.get('/health').status_code == 200
     assert client.get('/api/v1/transactions').status_code == 401
@@ -31,8 +34,18 @@ def test_graph_fan_in_and_velocity(client, auth):
     graph = client.get('/api/v1/graph', headers=auth).json()
     assert 'MULE-001' in graph['indicators']['high_fan_in_accounts']
     assert len(graph['edges']) == 6
+    assert graph['indicators']['window_minutes'] == 1440
+    assert 'rapid_transfer_chains' in graph['indicators']
     r2 = client.post('/api/v1/demo/simulate', json={'scenario': 'velocity'}, headers=auth)
     assert r2.json()[-1]['risk_score'] > r2.json()[0]['risk_score']
+    chain = client.post('/api/v1/demo/simulate', json={'scenario': 'chain'}, headers=auth)
+    assert chain.status_code == 200
+    graph = client.get('/api/v1/graph', headers=auth).json()
+    assert any(c['path'] == ['SOURCE-110', 'LINK-111', 'LINK-112'] for c in graph['indicators']['rapid_transfer_chains'])
+    cycle = client.post('/api/v1/demo/simulate', json={'scenario': 'cycle'}, headers=auth)
+    assert cycle.status_code == 200
+    graph = client.get('/api/v1/graph', headers=auth).json()
+    assert ['CYCLE-201', 'CYCLE-202', 'CYCLE-203', 'CYCLE-201'] in graph['indicators']['directed_three_node_cycles']
 
 
 def test_validation_and_model_unavailable(client, auth):
@@ -42,9 +55,98 @@ def test_validation_and_model_unavailable(client, auth):
     assert bad.status_code == 422
     missing = client.post('/api/v1/ieee/predict', json={'features': {'TransactionAmt': 5}}, headers=auth)
     assert missing.status_code == 503
+    paysim = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0}}, headers=auth)
+    assert paysim.status_code == 503  # no artifact must never generate a score
+    baf = client.post('/api/v1/baf/predict', json={'features': {'income': 0.5}}, headers=auth)
+    assert baf.status_code == 503
+    leaked = client.post('/api/v1/paysim/predict', json={'features': {'type': 'TRANSFER', 'amount': 5, 'oldbalanceOrg': 5, 'oldbalanceDest': 0, 'isFraud': 1}}, headers=auth)
+    assert leaked.status_code == 422
+    status = client.get('/api/v1/model/status', headers=auth)
+    assert status.status_code == 200
+    assert status.json()['ready'] is False
+
+
+def test_api_rejects_oversized_or_invalid_content_length(client, auth):
+    too_large = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': '65537'}, content=b'{}')
+    assert too_large.status_code == 413
+    invalid = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': 'not-a-length'}, content=b'{}')
+    assert invalid.status_code == 400
+    negative = client.post('/api/v1/transfers', headers={**auth, 'Content-Length': '-1'}, content=b'{}')
+    assert negative.status_code == 400
+    # Non-API routes and ordinary valid API requests retain their existing behavior.
+    assert client.get('/demo/').status_code == 200
+    assert client.post('/api/v1/transfers', headers=auth,
+                       json={'sender': 'BODY-001', 'recipient': 'BODY-002', 'amount': 1}).status_code == 200
+
+
+def test_api_body_limiter_counts_chunked_bytes_without_content_length():
+    """A chunked transport must not bypass the declared-header check."""
+    from app.main import ApiBodyLimitMiddleware
+
+    chunks = iter([
+        {'type': 'http.request', 'body': b'12345', 'more_body': True},
+        {'type': 'http.request', 'body': b'67890', 'more_body': False},
+    ])
+    sent = []
+
+    async def receive():
+        return next(chunks)
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(scope, receive, send):
+        while True:
+            message = await receive()
+            if not message.get('more_body', False):
+                break
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    scope = {'type': 'http', 'path': '/api/v1/paysim/predict', 'headers': []}
+    asyncio.run(ApiBodyLimitMiddleware(downstream, max_body_bytes=8)(scope, receive, send))
+    assert sent[0]['type'] == 'http.response.start'
+    assert sent[0]['status'] == 413
+
+
+def test_chunked_overlimit_request_returns_cors_enabled_413_from_full_app():
+    """Exercise the installed middleware order, not just the limiter in isolation."""
+    from app.main import app
+
+    chunks = iter([
+        {'type': 'http.request', 'body': b'a' * 40_000, 'more_body': True},
+        {'type': 'http.request', 'body': b'b' * 30_000, 'more_body': False},
+    ])
+    sent = []
+
+    async def receive():
+        return next(chunks)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1', 'method': 'POST',
+        'scheme': 'http', 'path': '/api/v1/transfers', 'raw_path': b'/api/v1/transfers',
+        'query_string': b'', 'root_path': '', 'client': ('testclient', 50000), 'server': ('testserver', 80),
+        'headers': [(b'origin', b'http://localhost:5173')],
+    }
+    asyncio.run(app(scope, receive, send))
+    start = next(message for message in sent if message['type'] == 'http.response.start')
+    headers = dict(start['headers'])
+    assert start['status'] == 413
+    assert headers[b'access-control-allow-origin'] == b'http://localhost:5173'
 
 
 def test_autonomous_demo_page(client):
     response = client.get('/demo/')
     assert response.status_code == 200
     assert 'IZQAR' in response.text
+
+
+def test_api_body_limit_keeps_cors_headers(client, auth):
+    response = client.post('/api/v1/transfers', headers={
+        **auth, 'Origin': 'http://localhost:5173', 'Content-Length': '65537',
+    }, content=b'{}')
+    assert response.status_code == 413
+    assert response.headers['access-control-allow-origin'] == 'http://localhost:5173'
