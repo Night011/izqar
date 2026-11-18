@@ -21,6 +21,19 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 - GitHub Actions blocked by account billing lock (all branches, 2–4s, zero steps); 144 local tests pass.
 - Revert note: to roll back the IBM+IEEE merge use targeted `git revert` on the specific merge commit — never reset main to 0d2e9ea (would lose both agents' work).
 
+## Stage 2 — error analysis (v1, train months [0..4], valid month 5)
+
+- Metrics (00th-pct threshold): PR-AUC 0.167 (fold-5), F1 0.246 at 73 FP/10k (99th pct).
+- Dominant signal: housing_status_BA (~0.49 mean |SHAP|, 0.32 importance) — 4.1% fraud rate segment with 770/873 FPs; device_os=windows (0.42), phone_home_valid, has_other_cards, keep_alive_session, name_email_similarity, income, prev_address_months_count missing indicator.
+- FN concentration: employment_status CA/CB/CF (FN share 0.75/0.95/1.0), housing_status BC/BE (0.93/1.0), device_os linux/macintosh (0.94/0.76). Frauds hide in these segments; FPs concentrate in BA/windows/free-email segments — inherent imbalance trade-off.
+- Stability: same top features across months; name_email_similarity weaker but stable mid-rank.
+- Not promoted: v2 engineered features (no fold gain). Velocity aggregates excluded from candidates (Stage 4).
+
+## Stage 3 — in flight
+
+- Kaggle GPU kernel `hoogle57/izqar-baf-algorithms-gpu-v1` (rev 97ebd1b): XGBoost vs LightGBM vs CatBoost × v1/v2 on identical folds. Status: QUEUED.
+- Controlled local arm: v1 with max_depth=6 (only change vs v1) — running (PID 5244).
+
 ## Log
 
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
