@@ -1,0 +1,3 @@
+# Downloaded Kaggle kernel outputs (repo checkout inside) — keep only metrics
+kaggle/outputs/izqar_ieee_v4/
+*.log
