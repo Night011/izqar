@@ -80,6 +80,40 @@ def run_fold(algo, feats, train_rows, fold_valid, features, seed, device='cpu'):
                                    task_type=('GPU' if device == 'cuda' else 'CPU'))
         model.fit(train, y_fold, eval_set=(valid, fold_valid.fraud_bool.astype('int8')), verbose=False)
         scores = model.predict_proba(valid)[:, 1]
+    elif algo == 'ensemble':
+        # Rank-averaged blend: XGBoost (v1 config) + CatBoost (native cats), same fold.
+        from catboost import CatBoostClassifier
+        from xgboost import XGBClassifier
+        pre = make_preprocess(numeric_cols)
+        x_tr = pre.fit_transform(train_rows[features])
+        x_va = pre.transform(fold_valid[features])
+        xgb = XGBClassifier(n_estimators=400, max_depth=4, learning_rate=.06,
+                            subsample=.85, colsample_bytree=.85, reg_lambda=4,
+                            objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
+                            scale_pos_weight=spw, random_state=seed,
+                            n_jobs=min(4, os.cpu_count() or 1), early_stopping_rounds=40, device=device)
+        xgb.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))], verbose=False)
+        xgb_scores = xgb.predict_proba(x_va)[:, 1]
+        tn = train_rows[features].copy()
+        vn = fold_valid[features].copy()
+        for col in numeric_cols:
+            med = tn[col].median()
+            tn[col] = tn[col].fillna(med)
+            vn[col] = vn[col].fillna(med)
+        for col in CATEGORICAL:
+            tn[col] = tn[col].astype('string').fillna('__missing__').astype(str)
+            vn[col] = vn[col].astype('string').fillna('__missing__').astype(str)
+        cb = CatBoostClassifier(iterations=400, depth=4, learning_rate=.06,
+                                loss_function='Logloss', eval_metric='PRAUC',
+                                class_weights=[1.0, float(spw)], random_state=seed,
+                                od_type='Iter', od_wait=40, verbose=False,
+                                cat_features=list(range(len(numeric_cols), len(numeric_cols) + len(CATEGORICAL))),
+                                task_type=('GPU' if device == 'cuda' else 'CPU'))
+        cb.fit(tn, y_fold, eval_set=(vn, fold_valid.fraud_bool.astype('int8')), verbose=False)
+        cb_scores = cb.predict_proba(vn)[:, 1]
+        ra = xgb_scores.argsort().argsort() / max(len(xgb_scores) - 1, 1)
+        rb = cb_scores.argsort().argsort() / max(len(cb_scores) - 1, 1)
+        scores = 0.5 * (ra + rb)
     elif algo == 'lightgbm_fix':
         pre = make_preprocess(numeric_cols)
         from lightgbm import LGBMClassifier, early_stopping, log_evaluation
