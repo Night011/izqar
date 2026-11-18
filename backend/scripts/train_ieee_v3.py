@@ -1,19 +1,25 @@
-"""Train an improved IEEE-CIS transaction classifier (experimental v3 candidate).
+"""Train an improved IEEE-CIS transaction classifier (experimental candidate).
 
-Improvements over train_ieee.py (ieee_final_v2):
-  * Full C/D/M/V feature set instead of V1..V3 only.
-  * Engineered amount/time/email/missingness features.
-  * Train-fold frequency encodings for high-cardinality identifiers (no leakage).
-  * Native XGBoost NaN handling for numerics; early stopping on validation aucpr.
-  * Extended metrics: Precision@100/@1000, false alerts per 10k, FN count.
+Full C/D/V feature set + engineered amount/time/email/missingness features and
+*causal* frequency features: each row only sees occurrences of its keys in
+strictly earlier rows (chronological cumcount). No future information is used,
+not even inside the training period.
 
-Protocol: identical chronological 70/15/15 TransactionDT split; threshold tuned
-on validation only; test evaluated once. Never trains on synthetic simulators.
+Evaluation modes:
+  * research (default): 3 expanding chronological folds inside the first 85% of
+    the data. The final 15% tail is never evaluated or needed; no production
+    artifact is written. Use this for hyperparameter/feature comparisons.
+  * final: single chronological 70/15/15 split; threshold from validation only;
+    the previously used test set is evaluated once and is a *historical
+    benchmark*, not an independent sealed holdout.
+
+Protocol: chronological order by TransactionDT; threshold tuned on validation
+only; no synthetic simulator data; artifact format v1 (compatible with
+app.ml.predict_ieee via IZQAR_MODEL_PATH).
 """
 from __future__ import annotations
 import argparse
 import json
-import math
 import os
 import time
 from datetime import datetime, timezone
@@ -46,6 +52,9 @@ ENGINEERED_NUMERIC = ['amt_log', 'amt_cents', 'dt_hour', 'dt_day', 'email_match'
 FREQ_SOURCES = {'card1_freq': ['card1'], 'card1_card5_freq': ['card1', 'card5'],
                 'card2_freq': ['card2'], 'addr1_freq': ['addr1'],
                 'p_email_freq': ['P_emaildomain'], 'device_freq': ['DeviceInfo']}
+# Expanding folds inside the first 85% of the chronological data:
+# (train_frac, valid_frac) pairs. The 15% tail is never used in research mode.
+RESEARCH_FOLDS = ((.40, .55), (.55, .70), (.70, .85))
 
 
 def add_engineered(df: pd.DataFrame) -> pd.DataFrame:
@@ -65,22 +74,68 @@ def add_engineered(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def fit_freq_maps(train: pd.DataFrame) -> dict[str, dict]:
-    maps = {}
-    for name, cols in FREQ_SOURCES.items():
-        key = train[cols].astype('string').fillna('__missing__').agg('_'.join, axis=1) if len(cols) > 1 \
-            else train[cols[0]].astype('string').fillna('__missing__')
-        maps[name] = key.value_counts(normalize=True).to_dict()
-    return maps
+def freq_key(df: pd.DataFrame, cols: list[str]) -> pd.Series:
+    if len(cols) > 1:
+        return df[cols].astype('string').fillna('__missing__').agg('_'.join, axis=1)
+    return df[cols[0]].astype('string').fillna('__missing__')
 
 
-def apply_freq_maps(df: pd.DataFrame, maps: dict[str, dict]) -> pd.DataFrame:
+def add_causal_freq(df: pd.DataFrame) -> pd.DataFrame:
+    """Prior-occurrence counts; strictly causal because df is TransactionDT-sorted."""
     df = df.copy()
     for name, cols in FREQ_SOURCES.items():
-        key = df[cols].astype('string').fillna('__missing__').agg('_'.join, axis=1) if len(cols) > 1 \
-            else df[cols[0]].astype('string').fillna('__missing__')
-        df[name] = key.map(maps[name]).fillna(0).astype('float32')
+        if any(col not in df.columns for col in cols):
+            continue
+        key = freq_key(df, cols)
+        df[name] = key.groupby(key).cumcount().astype('float32')
     return df
+
+
+def select_feature_lists(columns) -> tuple[list[str], list[str], list[str]]:
+    available = set(columns)
+    nums = [c for c in BASE_NUMERIC + ENGINEERED_NUMERIC if c in available]
+    cats = [c for c in CATEGORICAL if c in available]
+    return nums + cats, nums, cats
+
+
+def prepare_columns(train_rows, valid_rows, test_rows, nums, cats):
+    for col in nums:
+        for part in (train_rows, valid_rows, test_rows):
+            part[col] = pd.to_numeric(part[col], errors='coerce').astype('float32')
+    for col in cats:
+        for part in (train_rows, valid_rows, test_rows):
+            part[col] = part[col].astype('string').fillna('__missing__').astype(str)
+
+
+def build_pipeline(nums, cats, n_estimators, seed, negatives, positives, device='cpu'):
+    transform = ColumnTransformer([
+        ('numeric', 'passthrough', nums),
+        ('category', OneHotEncoder(handle_unknown='ignore', min_frequency=100,
+                                   max_categories=60), cats),
+    ], sparse_threshold=.3)
+    classifier = XGBClassifier(
+        n_estimators=n_estimators, max_depth=5, learning_rate=.05, subsample=.8,
+        colsample_bytree=.6, reg_lambda=4, objective='binary:logistic',
+        tree_method='hist', eval_metric='aucpr', random_state=seed,
+        n_jobs=min(8, os.cpu_count() or 1), scale_pos_weight=float(negatives / max(positives, 1)),
+        early_stopping_rounds=60, device=device,
+    )
+    return transform, classifier
+
+
+def fit_on(train_rows, valid_rows, n_estimators, seed, device='cpu'):
+    features, nums, cats = select_feature_lists(train_rows.columns)
+    prepare_columns(train_rows, valid_rows, train_rows.iloc[:0], nums, cats)
+    positives = int(train_rows['isFraud'].sum())
+    negatives = len(train_rows) - positives
+    transform, classifier = build_pipeline(nums, cats, n_estimators, seed, negatives, positives, device)
+    x_train, y_train = train_rows[features], train_rows['isFraud'].astype(int)
+    x_valid, y_valid = valid_rows[features], valid_rows['isFraud'].astype(int)
+    x_train_t = transform.fit_transform(x_train)
+    x_valid_t = transform.transform(x_valid)
+    classifier.fit(x_train_t, y_train, eval_set=[(x_valid_t, y_valid)], verbose=False)
+    pipeline = Pipeline([('preprocessing', transform), ('model', classifier)])
+    return pipeline, features, nums, cats, getattr(classifier, 'best_iteration', None)
 
 
 def metrics(y_true, scores, threshold):
@@ -113,8 +168,7 @@ def choose_threshold(y_true, scores):
     return float(thresholds[int(np.argmax(f1))])
 
 
-def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None, seed: int):
-    t0 = time.time()
+def load_sorted(data_dir: Path, max_rows: int | None) -> pd.DataFrame:
     tx_path = data_dir / 'train_transaction.csv'
     id_path = data_dir / 'train_identity.csv'
     if not tx_path.exists():
@@ -124,99 +178,126 @@ def train(data_dir: Path, output: Path, n_estimators: int, max_rows: int | None,
         identity = pd.read_csv(id_path, low_memory=False)
         data = data.merge(identity, on='TransactionID', how='left', validate='one_to_one')
     data = data.sort_values(['TransactionDT', 'TransactionID'], kind='stable').reset_index(drop=True)
-    data = add_engineered(data)
+    for label, part in [('all', data)]:
+        if part['isFraud'].nunique() != 2:
+            raise ValueError(f'{label} must contain both classes.')
+    return data
 
-    first, second = int(len(data) * .70), int(len(data) * .85)
-    train_rows, valid_rows, test_rows = data.iloc[:first], data.iloc[first:second], data.iloc[second:]
+
+def build_features(data: pd.DataFrame, freq_mode: str) -> pd.DataFrame:
+    data = add_engineered(data)
+    if freq_mode == 'causal':
+        data = add_causal_freq(data)
+    return data
+
+
+def run_research(data: pd.DataFrame, args, t0: float):
+    n = len(data)
+    fold_reports = []
+    for train_frac, valid_frac in RESEARCH_FOLDS:
+        train_end, valid_end = int(n * train_frac), int(n * valid_frac)
+        train_rows = data.iloc[:train_end].copy()
+        valid_rows = data.iloc[train_end:valid_end].copy()
+        for label, part in [('train', train_rows), ('validation', valid_rows)]:
+            if part['isFraud'].nunique() != 2:
+                raise ValueError(f'fold {train_frac}-{valid_frac}: {label} split must contain both classes.')
+        pipeline, features, nums, cats, best_iteration = fit_on(train_rows, valid_rows,
+                                                                args.estimators, args.seed, args.device)
+        report_features = features
+        y_valid = valid_rows['isFraud'].astype(int).to_numpy()
+        scores = pipeline.predict_proba(valid_rows[features])[:, 1]
+        threshold = choose_threshold(y_valid, scores)
+        fold_reports.append({'train_frac': train_frac, 'valid_frac': valid_frac,
+                             'train_rows': len(train_rows), 'valid_rows': len(valid_rows),
+                             'best_iteration': int(best_iteration) if best_iteration is not None else None,
+                             'threshold': round(threshold, 6),
+                             'metrics': metrics(y_valid, scores, threshold)})
+        print(f"fold train<{train_frac} valid[{train_frac},{valid_frac}): "
+              f"PR-AUC {fold_reports[-1]['metrics']['average_precision_pr_auc']:.6f} "
+              f"F1 {fold_reports[-1]['metrics']['f1']:.6f}", flush=True)
+    keys = fold_reports[0]['metrics'].keys()
+    mean_metrics = {k: round(float(np.mean([r['metrics'][k] for r in fold_reports])), 6)
+                    for k in keys if isinstance(fold_reports[0]['metrics'][k], (int, float))}
+    report = {'mode': 'research', 'freq_mode': args.freq,
+              'trained_at_utc': datetime.now(timezone.utc).isoformat(),
+              'folds': fold_reports, 'mean_metrics': mean_metrics,
+              'features_used': report_features, 'note': 'The 15% chronological tail was never loaded for evaluation.',
+              'train_seconds': round(time.time() - t0, 1)}
+    return report
+
+
+def run_final(data: pd.DataFrame, args, t0: float):
+    n = len(data)
+    first, second = int(n * .70), int(n * .85)
+    train_rows, valid_rows, test_rows = data.iloc[:first].copy(), data.iloc[first:second].copy(), data.iloc[second:].copy()
     for label, part in [('train', train_rows), ('validation', valid_rows), ('test', test_rows)]:
         if part['isFraud'].nunique() != 2:
             raise ValueError(f'{label} split must contain both classes.')
-
-    freq_maps = fit_freq_maps(train_rows)
-    train_rows = apply_freq_maps(train_rows, freq_maps)
-    valid_rows = apply_freq_maps(valid_rows, freq_maps)
-    test_rows = apply_freq_maps(test_rows, freq_maps)
-
-    nums = [c for c in BASE_NUMERIC + ENGINEERED_NUMERIC if c in data.columns]
-    cats = [c for c in CATEGORICAL if c in data.columns]
-    features = nums + cats
-    for col in nums:
-        train_rows[col] = pd.to_numeric(train_rows[col], errors='coerce').astype('float32')
-        valid_rows[col] = pd.to_numeric(valid_rows[col], errors='coerce').astype('float32')
-        test_rows[col] = pd.to_numeric(test_rows[col], errors='coerce').astype('float32')
-    for col in cats:
-        for part in (train_rows, valid_rows, test_rows):
-            part[col] = part[col].astype('string').fillna('__missing__').astype(str)
-
-    transform = ColumnTransformer([
-        ('numeric', 'passthrough', nums),
-        ('category', OneHotEncoder(handle_unknown='ignore', min_frequency=100,
-                                   max_categories=60), cats),
-    ], sparse_threshold=.3)
-    positives = int(train_rows['isFraud'].sum())
-    negatives = len(train_rows) - positives
-    classifier = XGBClassifier(
-        n_estimators=n_estimators, max_depth=5, learning_rate=.05, subsample=.8,
-        colsample_bytree=.6, reg_lambda=4, objective='binary:logistic',
-        tree_method='hist', eval_metric='aucpr', random_state=seed,
-        n_jobs=min(8, os.cpu_count() or 1), scale_pos_weight=float(negatives / positives),
-        early_stopping_rounds=60,
-    )
-    x_train, y_train = train_rows[features], train_rows['isFraud'].astype(int)
-    x_valid, y_valid = valid_rows[features], valid_rows['isFraud'].astype(int)
-    x_test, y_test = test_rows[features], test_rows['isFraud'].astype(int)
-    # Fit the transformer once so the eval set can be passed to XGBoost early stopping.
-    x_train_t = transform.fit_transform(x_train)
-    x_valid_t = transform.transform(x_valid)
-    x_test_t = transform.transform(x_test)
-    classifier.fit(x_train_t, y_train, eval_set=[(x_valid_t, y_valid)], verbose=False)
-    best_iteration = getattr(classifier, 'best_iteration', None)
-    pipeline = Pipeline([('preprocessing', transform), ('model', classifier)])
-
-    validation_scores = pipeline.predict_proba(x_valid)[:, 1]
-    threshold = choose_threshold(y_valid.to_numpy(), validation_scores)
-    test_scores = pipeline.predict_proba(x_test)[:, 1]
-    validation_metrics = metrics(y_valid.to_numpy(), validation_scores, threshold)
-    test_metrics = metrics(y_test.to_numpy(), test_scores, threshold)
-    train_seconds = round(time.time() - t0, 1)
-
+    pipeline, features, nums, cats, best_iteration = fit_on(train_rows, valid_rows,
+                                                            args.estimators, args.seed, args.device)
+    prepare_columns(train_rows.iloc[:0], valid_rows, test_rows, nums, cats)
+    y_valid = valid_rows['isFraud'].astype(int).to_numpy()
+    y_test = test_rows['isFraud'].astype(int).to_numpy()
+    validation_scores = pipeline.predict_proba(valid_rows[features])[:, 1]
+    threshold = choose_threshold(y_valid, validation_scores)
+    test_scores = pipeline.predict_proba(test_rows[features])[:, 1]
+    validation_metrics = metrics(y_valid, validation_scores, threshold)
+    test_metrics = metrics(y_test, test_scores, threshold)
     artifact = {
         'format_version': 1,
-        'model_version': 'ieee-cis-xgboost-v3-candidate',
+        'model_version': 'ieee-cis-xgboost-v4-candidate',
         'trained_at_utc': datetime.now(timezone.utc).isoformat(),
         'dataset': 'IEEE-CIS Fraud Detection (Kaggle competition)',
         'pipeline': pipeline,
         'features': features,
         'numerical_features': nums,
         'categorical_features': cats,
+        'freq_mode': args.freq,
         'threshold': threshold,
         'validation_metrics': validation_metrics,
         'test_metrics': test_metrics,
-        'split_method': '70/15/15 chronological TransactionDT ascending (identical to ieee_final_v2)',
+        'split_method': '70/15/15 chronological TransactionDT ascending; test tail is a historical benchmark, not a sealed holdout',
         'best_iteration': int(best_iteration) if best_iteration is not None else None,
-        'train_seconds': train_seconds,
-        'warning': 'Research dataset; scores not calibrated for deployment and not a guarantee of banking fraud detection.',
+        'train_seconds': round(time.time() - t0, 1),
+        'warning': 'Research dataset; test used previously for benchmarking; scores not calibrated for deployment.',
     }
+    output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(artifact, output, compress=3)
     report = {k: v for k, v in artifact.items() if k != 'pipeline'}
     report['threshold'] = round(threshold, 6)
+    report['mode'] = 'final'
     output.with_suffix('.metrics.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'model_path': str(output), 'best_iteration': artifact['best_iteration'],
-                      'train_seconds': train_seconds,
+                      'train_seconds': artifact['train_seconds'],
                       'validation': validation_metrics, 'test': test_metrics}, ensure_ascii=False, indent=2))
-    print('IMPORTANT: The held-out test set was evaluated once after threshold selection on validation.')
+    return report
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train improved IEEE-CIS v3 candidate')
+    parser = argparse.ArgumentParser(description='Train improved IEEE-CIS candidate')
     parser.add_argument('--data-dir', type=Path, required=True)
-    parser.add_argument('--output', type=Path, default=Path('models/experiments/ieee_v3_candidate.joblib'))
+    parser.add_argument('--output', type=Path, default=Path('models/experiments/ieee_v4_candidate.joblib'))
     parser.add_argument('--estimators', type=int, default=1500)
     parser.add_argument('--max-rows', type=int, default=None)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--mode', choices=['research', 'final'], default='research')
+    parser.add_argument('--freq', choices=['causal', 'none'], default='causal')
+    parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
-    train(args.data_dir, args.output, args.estimators, args.max_rows, args.seed)
+    t0 = time.time()
+    data = load_sorted(args.data_dir, args.max_rows)
+    data = build_features(data, args.freq)
+    if args.mode == 'research':
+        report = run_research(data, args, t0)
+        out = Path(str(args.output).replace('.joblib', '.cv.metrics.json')) if str(args.output).endswith('.joblib') \
+            else Path(args.output).with_suffix('.cv.metrics.json')
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        print(json.dumps(report['mean_metrics'], ensure_ascii=False, indent=2))
+        print(f'research report: {out}')
+    else:
+        run_final(data, args, t0)
 
 
 if __name__ == '__main__':
