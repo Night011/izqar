@@ -36,4 +36,9 @@ Data read-only from `C:\Users\a\Documents\IZQAR-MVP\backend\data\ieee` (train_tr
 - pytest exits 0 (SQLite engine disposed at exit in conftest). 15 passed.
 - Kaggle GPU kernel `hoogle57/izqar-ieee-v4-causal-gpu-cv-v1` pushed (pinned revision 9517541, full features + causal FE, research CV only, arms causal vs none on identical folds). Results pending.
  (1172 s). Test PR-AUC 0.5074 (+0.0632 vs baseline), F1 0.4915, P@100 1.0, P@1000 0.852, FP/10k 94.0 (vs 129.6), ROC-AUC 0.8987, recall flat −0.001. Artifact check OK (401 features). Details: docs/IEEE_V3_RESULTS.md.
-- Follow-up run with --estimators 3000 (early stopping still enabled) launched 2026-11-18 to test whether the 1500-tree cap was binding.
+- Kaggle GPU kernel v1 (hoogle57/izqar-ieee-v4-causal-gpu-cv-v1): arms causal vs none on identical folds. causal mean PR-AUC 0.5600 vs none 0.5754 (none better on all 3 folds). Kernel COMPLETE; benign cuda/cpu UserWarnings only. Metrics committed (kaggle/outputs/).
+- Kaggle kernel v2 (causal_log arm, 5a8b8a4): mean PR-AUC 0.5569 — no gain. Frequency features rejected by the evidence; v4 candidate = v3-fixed configuration (401 features). Full report: docs/IEEE_V4_CV_RESULTS.md.
+- Research mode now physically excludes the final 15% tail before any processing (verified: excluded_tail_rows=88581 on full data); folds relative to truncated pool.
+- Freq reproduction at inference implemented + verified (app/ieee_freq.py, score_ieee_batch.py, predict_ieee freq_state fallback, check_ieee_artifact freq_state guard, 144 tests passed).
+- CI root cause: check-run annotation on ALL runs (every branch incl. main): "The job was not started because your account is locked due to a billing issue." CI does not execute at all; local pytest is the verification path.
+- IBM branch merged into feat/ieee-cis-research (cc48db2): conftest now byte-identical to IBM's (SQLite teardown fixture, pytest exits 0), .gitignore/main.py/ml.py unions contain both agents' changes (ieee-candidate endpoint + investigations/model-registry). 140 tests passed pre-freq-machinery, 144 after.
