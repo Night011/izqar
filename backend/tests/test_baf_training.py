@@ -7,7 +7,7 @@ import pytest
 
 pd = pytest.importorskip('pandas')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from train_baf import CATEGORICAL, FEATURES, NUMERIC, read_base, train  # noqa: E402
+from train_baf import CATEGORICAL, FEATURES, NUMERIC, VELOCITY, read_base, train  # noqa: E402
 from export_portable_model import export as export_portable_model  # noqa: E402
 from install_model_bundle import install as install_model_bundle  # noqa: E402
 
@@ -28,8 +28,20 @@ def make_base(path: Path):
         data[name] = [float(i % 15 + 1) for i in range(n)]
     for name in CATEGORICAL:
         data[name] = ['a' if i % 2 else 'b' for i in range(n)]
+    for name in VELOCITY:
+        data[name] = [float(i % 7) for i in range(n)]
     data['prev_address_months_count'][0] = -1
     pd.DataFrame(data).to_csv(path, index=False)
+
+
+def test_baf_velocity_feature_set_is_trainable(tmp_path):
+    path = tmp_path / 'Base.csv'
+    make_base(path)
+    report = train(path, tmp_path / 'v1v.json', n_estimators=8, mode='research',
+                   protocol='calibrated', max_false_alerts_per_10000=100,
+                   early_stopping_rounds=2, feature_set='v1v')
+    assert 'zip_count_4w' in report['features']
+    assert [fold['external_month'] for fold in report['folds']] == [3, 4, 5]
 
 
 def test_baf_base_train_and_final_holdout(tmp_path, client, auth, monkeypatch):

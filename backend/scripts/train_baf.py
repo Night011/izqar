@@ -300,7 +300,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         raise ValueError('early_stopping_rounds must be positive when supplied')
     if max_train_rows is not None and max_train_rows < 100:
         raise ValueError('max_train_rows must be at least 100')
-    data = read_base(data_path)
+    data = read_base(data_path, VELOCITY if feature_set == 'v1v' else ())
     numeric_cols, feature_cols = FEATURE_SETS[feature_set]
     if feature_set == 'v2':
         data = add_engineered(data)
@@ -418,7 +418,7 @@ def main():
     parser.add_argument('--protocol', choices=['calibrated', 'infold'], default='calibrated',
                         help='Research-only: calibrated = threshold and rounds fixed on an earlier '
                              'calibration month; infold = legacy optimistic selection on the reported fold')
-    parser.add_argument('--feature-set', choices=['v1', 'v2'], default='v1')
+    parser.add_argument('--feature-set', choices=sorted(FEATURE_SETS), default='v1')
     parser.add_argument('--max-depth', type=int, default=4)
     parser.add_argument('--learning-rate', type=float, default=.06)
     parser.add_argument('--estimators', type=int, default=180)
