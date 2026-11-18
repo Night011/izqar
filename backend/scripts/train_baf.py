@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 from experiment_tracking import finish_experiment, start_experiment
+from baf_protocol import (calibrated_folds, evaluate_external, infold_folds, mean_external_metrics,
+                         rows_fingerprint, select_operating_point)
 from train_ieee import (calibration_diagnostics, file_provenance, metrics, operating_profiles, ranking_metrics,
                         temporal_drift_diagnostics, threshold_analysis)
 
@@ -105,63 +108,160 @@ def split_months(data: pd.DataFrame):
     return parts, {'train_months': months[:-2], 'validation_month': valid_month, 'test_month': test_month}
 
 
+def _baf_preprocessing(numeric_cols):
+    numeric = Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True))])
+    categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
+                            ('onehot', OneHotEncoder(handle_unknown='ignore', max_categories=20))])
+    return ColumnTransformer([('numeric', numeric, numeric_cols),
+                              ('categorical', categorical, CATEGORICAL)])
+
+
+def _fit_xgboost(fit_rows: pd.DataFrame, monitor_rows: pd.DataFrame | None, feature_cols,
+                 numeric_cols, *, n_estimators: int, max_depth: int, learning_rate: float,
+                 positive_weight_multiplier: float, early_stopping_rounds: int | None, seed: int):
+    """Fit on ``fit_rows`` only; ``monitor_rows`` may drive early stopping."""
+    preprocessing = _baf_preprocessing(numeric_cols)
+    y_fit = fit_rows.fraud_bool.astype('int8')
+    positive = int(y_fit.sum())
+    model = XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
+                          subsample=.85, colsample_bytree=.85, reg_lambda=4,
+                          objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
+                          scale_pos_weight=((len(y_fit) - positive) / positive) * positive_weight_multiplier,
+                          random_state=seed, n_jobs=min(4, os.cpu_count() or 1),
+                          early_stopping_rounds=early_stopping_rounds)
+    x_fit = preprocessing.fit_transform(fit_rows[feature_cols])
+    eval_set = None
+    if monitor_rows is not None:
+        eval_set = [(preprocessing.transform(monitor_rows[feature_cols]),
+                     monitor_rows.fraud_bool.astype('int8'))]
+    started = time.perf_counter()
+    model.fit(x_fit, y_fit, eval_set=eval_set, verbose=False)
+    return model, preprocessing, time.perf_counter() - started
+
+
+def _frozen_scores(model, matrix, best_iteration: int | None):
+    """Score using a round count that was fixed before the external fold was read."""
+    if best_iteration is None:
+        return model.predict_proba(matrix)[:, 1]
+    return model.predict_proba(matrix, iteration_range=(0, int(best_iteration) + 1))[:, 1]
+
+
+def _research_fold(fold: dict, train_rows: pd.DataFrame, feature_cols, numeric_cols, *, protocol: str,
+                   max_false_alerts_per_10000: float | None, n_estimators: int, max_depth: int,
+                   learning_rate: float, positive_weight_multiplier: float,
+                   early_stopping_rounds: int | None, seed: int) -> dict:
+    calibration_month = fold.get('calibration_month')
+    fit_rows = train_rows[train_rows.month.isin(fold['train_months'])]
+    external_rows = train_rows[train_rows.month == fold['external_month']]
+    # Under the corrected protocol the calibration month is a separate, earlier
+    # period. Under the legacy protocol selection falls back to the external
+    # fold itself, which is exactly the optimism this work documents.
+    selection_rows = (train_rows[train_rows.month == calibration_month]
+                      if calibration_month is not None else external_rows)
+    for label, rows in (('fit', fit_rows), ('calibration', selection_rows), ('external', external_rows)):
+        if rows.empty or rows.fraud_bool.nunique() != 2:
+            raise ValueError(f'fold selection produced an unusable {label} period')
+
+    model, preprocessing, fit_seconds = _fit_xgboost(
+        fit_rows, selection_rows, feature_cols, numeric_cols, n_estimators=n_estimators,
+        max_depth=max_depth, learning_rate=learning_rate,
+        positive_weight_multiplier=positive_weight_multiplier,
+        early_stopping_rounds=early_stopping_rounds, seed=seed)
+    best_iteration = getattr(model, 'best_iteration', None)
+
+    selection_scores = _frozen_scores(model, preprocessing.transform(selection_rows[feature_cols]),
+                                      best_iteration)
+    threshold, selection_report = select_operating_point(
+        selection_rows.fraud_bool, selection_scores, max_false_alerts_per_10000)
+    external_rows_matrix = preprocessing.transform(external_rows[feature_cols])
+    external_scores = _frozen_scores(model, external_rows_matrix, best_iteration)
+    external = evaluate_external(external_rows.fraud_bool, external_scores, threshold)
+
+    report = {
+        'protocol': protocol,
+        'train_months': list(fold['train_months']),
+        'calibration_month': calibration_month,
+        'external_month': fold['external_month'],
+        'rows': {'train': len(fit_rows), 'calibration': len(selection_rows),
+                 'external': len(external_rows)},
+        'checksums': {'train': rows_fingerprint(fit_rows),
+                      'calibration': rows_fingerprint(selection_rows),
+                      'external': rows_fingerprint(external_rows)},
+        'best_iteration': None if best_iteration is None else int(best_iteration),
+        'rounds_used': n_estimators if best_iteration is None else int(best_iteration) + 1,
+        'fit_seconds': round(float(fit_seconds), 3),
+        'selected_threshold': round(float(threshold), 6),
+        'selection': selection_report,
+        'external_metrics': external,
+    }
+    if calibration_month is not None:
+        report['calibration_metrics'] = metrics(selection_rows.fraud_bool, selection_scores, threshold)
+    else:
+        # Legacy layout: both choices were made on the reported fold, so say so.
+        report['selection']['selection_data'] = 'external fold (legacy, optimistic)'
+        report['external_metrics']['threshold_source'] = 'selected on the external fold (legacy, optimistic)'
+    return report
+
+
 def run_research(train_rows: pd.DataFrame, boundaries: dict, n_estimators: int,
                  max_false_alerts_per_10000: float | None, positive_weight_multiplier: float,
-                 early_stopping_rounds: int | None, feature_set: str, output: Path, max_depth: int = 4, learning_rate: float = .06):
-    """Expanding month folds over the *train region only*. Penultimate month (validation)
-    and the last month (final test) are never touched; no artifact is written."""
+                 early_stopping_rounds: int | None, feature_set: str, output: Path, max_depth: int = 4,
+                 learning_rate: float = .06, protocol: str = 'calibrated', seed: int = 42,
+                 data_path: Path | None = None):
+    """Expanding folds over the *train region only*; penultimate/final months untouched.
+
+    ``protocol='calibrated'`` (default) fixes the round count and the operating
+    threshold on an earlier calibration month, then scores the external fold
+    once. ``protocol='infold'`` reproduces the earlier optimistic setup, where
+    both choices were made on the reported fold itself.
+    """
+    if protocol not in {'calibrated', 'infold'}:
+        raise ValueError('protocol must be calibrated or infold')
     numeric_cols, feature_cols = FEATURE_SETS[feature_set]
     months = boundaries['train_months']
+    folds = calibrated_folds(months) if protocol == 'calibrated' else infold_folds(months)
     fold_reports = []
-    mean_keys = None
-    for k in range(3, len(months)):
-        fold_train = train_rows[train_rows.month.isin(months[:k])]
-        fold_valid = train_rows[train_rows.month == months[k]]
-        if fold_valid.empty or fold_valid.fraud_bool.nunique() != 2 or fold_train.fraud_bool.nunique() != 2:
-            continue
-        numeric = Pipeline([('imputer', SimpleImputer(strategy='median', add_indicator=True))])
-        categorical = Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='__missing__')),
-                                ('onehot', OneHotEncoder(handle_unknown='ignore', max_categories=20))])
-        preprocessing = ColumnTransformer([('numeric', numeric, numeric_cols),
-                                          ('categorical', categorical, CATEGORICAL)])
-        y_fold = fold_train.fraud_bool.astype('int8')
-        pos = int(y_fold.sum())
-        model = XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate,
-                              subsample=.85, colsample_bytree=.85, reg_lambda=4,
-                              objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
-                              scale_pos_weight=((len(y_fold) - pos) / pos) * positive_weight_multiplier,
-                              random_state=42, n_jobs=min(4, os.cpu_count() or 1),
-                              early_stopping_rounds=early_stopping_rounds)
-        x_tr = preprocessing.fit_transform(fold_train[feature_cols])
-        x_va = preprocessing.transform(fold_valid[feature_cols])
-        model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))], verbose=False)
-        scores = model.predict_proba(x_va)[:, 1]
-        threshold, threshold_report = threshold_analysis(fold_valid.fraud_bool, scores,
-                                                         max_false_alerts_per_10000)
-        fold_metrics = metrics(fold_valid.fraud_bool, scores, threshold)
-        fold_metrics.update(ranking_metrics(fold_valid.fraud_bool, scores))
-        fold_report = {'train_months': months[:k], 'valid_month': months[k],
-                       'train_rows': len(fold_train), 'valid_rows': len(fold_valid),
-                       'best_iteration': getattr(model, 'best_iteration', None),
-                       'threshold': round(float(threshold), 6), 'metrics': fold_metrics}
-        fold_reports.append(fold_report)
-        mean_keys = list(fold_metrics)
-        print(f"fold train months {months[:k]} valid month {months[k]}: "
-              f"PR-AUC {fold_metrics['average_precision_pr_auc']:.6f} F1 {fold_metrics['f1']:.6f} "
-              f"best_iter {fold_report['best_iteration']}", flush=True)
-    mean_metrics = {key: round(float(np.mean([r['metrics'][key] for r in fold_reports])), 6)
-                    for key in (mean_keys or [])
-                    if isinstance(fold_reports[0]['metrics'][key], (int, float))}
-    report = {'mode': 'research', 'feature_set': feature_set,
-              'trained_at_utc': datetime.now(timezone.utc).isoformat(),
-              'n_estimators': n_estimators, 'positive_weight_multiplier': positive_weight_multiplier,
-              'early_stopping_rounds': early_stopping_rounds,
-              'max_false_alerts_per_10000': max_false_alerts_per_10000,
-              'split_method': 'expanding month folds within the train region; penultimate/final months untouched',
-              'excluded_for_leakage': ['fraud_bool', 'month', 'device_fraud_count', 'days_since_request',
-                                       'credit_risk_score', 'unverified historical aggregates'],
-              'folds': fold_reports, 'mean_metrics': mean_metrics,
-              'features': feature_cols}
+    for fold in folds:
+        report = _research_fold(
+            fold, train_rows, feature_cols, numeric_cols, protocol=protocol,
+            max_false_alerts_per_10000=max_false_alerts_per_10000, n_estimators=n_estimators,
+            max_depth=max_depth, learning_rate=learning_rate,
+            positive_weight_multiplier=positive_weight_multiplier,
+            early_stopping_rounds=early_stopping_rounds, seed=seed)
+        fold_reports.append(report)
+        external = report['external_metrics']
+        print(f"fold train {report['train_months']} calibration {report['calibration_month']} "
+              f"external {report['external_month']}: PR-AUC {external['average_precision_pr_auc']:.6f} "
+              f"F1 {external['f1']:.6f} FP/10k {external['false_alerts_per_10000_operations']:.1f} "
+              f"rounds {report['rounds_used']} ({report['fit_seconds']:.1f}s)", flush=True)
+    mean_metrics = mean_external_metrics(fold_reports)
+    report = {
+        'mode': 'research', 'protocol': protocol,
+        'feature_set': feature_set,
+        'trained_at_utc': datetime.now(timezone.utc).isoformat(),
+        'n_estimators': n_estimators, 'positive_weight_multiplier': positive_weight_multiplier,
+        'early_stopping_rounds': early_stopping_rounds, 'seed': seed,
+        'max_depth': max_depth, 'learning_rate': learning_rate,
+        'max_false_alerts_per_10000': max_false_alerts_per_10000,
+        'data_provenance': None if data_path is None else file_provenance(Path(data_path)),
+        'library_versions': {'xgboost': xgboost.__version__, 'pandas': pd.__version__,
+                             'scikit_learn': sklearn.__version__},
+        'split_method': ('expanding month folds: train < calibration < external, strictly disjoint; '
+                         'penultimate/final months untouched'
+                         if protocol == 'calibrated' else
+                         'LEGACY expanding month folds with threshold and early stopping chosen on the '
+                         'external fold (optimistic); penultimate/final months untouched'),
+        'excluded_for_leakage': ['fraud_bool', 'month', 'device_fraud_count', 'days_since_request',
+                                 'credit_risk_score', 'unverified historical aggregates'],
+        'folds': fold_reports, 'mean_metrics': mean_metrics,
+        'features': feature_cols,
+    }
+    if protocol == 'calibrated':
+        report['selection_rule'] = ('rounds and threshold selected on the calibration month; the external '
+                                    'month is scored once with both frozen')
+    else:
+        report['selection_rule'] = ('threshold and early stopping selected on the external fold; numbers '
+                                    'from this protocol are not valid out-of-fold estimates')
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -172,11 +272,14 @@ def run_research(train_rows: pd.DataFrame, boundaries: dict, n_estimators: int,
 def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows: int | None = None,
           mode: str = 'experiment', max_false_alerts_per_10000: float | None = 100,
           positive_weight_multiplier: float = 1.0, early_stopping_rounds: int | None = None,
-          feature_set: str = 'v1', max_depth: int = 4, learning_rate: float = .06):
+          feature_set: str = 'v1', max_depth: int = 4, learning_rate: float = .06,
+          protocol: str = 'calibrated'):
     if mode not in {'experiment', 'final', 'research'}:
         raise ValueError('Use experiment, final or research mode')
     if feature_set not in FEATURE_SETS:
         raise ValueError(f'feature_set must be one of {sorted(FEATURE_SETS)}')
+    if protocol not in {'calibrated', 'infold'}:
+        raise ValueError('protocol must be calibrated or infold')
     if mode != 'research' and (output.exists() or output.with_suffix('.metrics.json').exists()):
         raise FileExistsError('Output already exists; preserve earlier experiment artifacts')
     if n_estimators < 1:
@@ -196,7 +299,8 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     (train_rows, validation_rows, test_rows), boundaries = split_months(data)
     if mode == 'research':
         return run_research(train_rows, boundaries, n_estimators, max_false_alerts_per_10000,
-                            positive_weight_multiplier, early_stopping_rounds, feature_set, output, max_depth, learning_rate)
+                            positive_weight_multiplier, early_stopping_rounds, feature_set, output,
+                            max_depth, learning_rate, protocol, 42, data_path)
     original_train_count = len(train_rows)
     if max_train_rows is not None:
         train_rows = train_rows.iloc[:max_train_rows]
@@ -303,6 +407,9 @@ def main():
     parser.add_argument('--data', type=Path, required=True, help='BAF Base.csv only')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--mode', choices=['experiment', 'final', 'research'], default='experiment')
+    parser.add_argument('--protocol', choices=['calibrated', 'infold'], default='calibrated',
+                        help='Research-only: calibrated = threshold and rounds fixed on an earlier '
+                             'calibration month; infold = legacy optimistic selection on the reported fold')
     parser.add_argument('--feature-set', choices=['v1', 'v2'], default='v1')
     parser.add_argument('--max-depth', type=int, default=4)
     parser.add_argument('--learning-rate', type=float, default=.06)
@@ -316,7 +423,8 @@ def main():
     args = parser.parse_args()
     train(args.data, args.output, args.estimators, args.max_train_rows, args.mode,
           args.max_false_alerts_per_10000, args.positive_weight_multiplier,
-          args.early_stopping_rounds, args.feature_set, args.max_depth, args.learning_rate)
+          args.early_stopping_rounds, args.feature_set, args.max_depth, args.learning_rate,
+          args.protocol)
 
 
 if __name__ == '__main__':

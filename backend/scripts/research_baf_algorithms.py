@@ -1,27 +1,52 @@
-"""Research-only algorithm comparison for BAF: XGBoost vs LightGBM vs CatBoost.
+"""Research-only algorithm comparison for BAF under the calibrated protocol.
 
-Identical expanding month folds, identical hyperparameters family, identical
-class weighting (scale_pos_weight), v1 and v2 feature sets. No artifact is
-written; the penultimate and final months are never touched.
+Every fold has three disjoint periods: train < calibration < external. The
+number of boosting rounds and the operating threshold are chosen on the
+calibration month; the external month is scored once with both frozen.
+
+Why rounds are selected explicitly instead of with early stopping: the earlier
+LightGBM arm used LightGBM early stopping on a class-weighted model. The
+monitored metric was weighted logloss, which necessarily rises once the model
+starts reweighting the classes, so the callback kept round 1 and LightGBM
+discarded every later tree (``booster.current_iteration() == 1``). The reported
+PR-AUC 0.052 was a one-tree model, not a LightGBM limitation. PR-AUC on the
+calibration month is now the single selection rule for every algorithm.
+
+No artifact is written; the penultimate and final months are never touched.
 """
 from __future__ import annotations
+
 import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
+from sklearn.metrics import average_precision_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from baf_protocol import (calibrated_folds, evaluate_external, mean_external_metrics,  # noqa: E402
+                          rows_fingerprint, select_operating_point)
 from train_baf import CATEGORICAL, FEATURE_SETS, add_engineered, read_base, split_months  # noqa: E402
-from train_ieee import metrics, ranking_metrics, threshold_analysis  # noqa: E402
+from train_ieee import file_provenance  # noqa: E402
+
+ROUND_GRID_STEP = 25
+
+LIGHTGBM_PARAMS = {
+    # Unweighted model; rounds chosen on calibration PR-AUC.
+    'lightgbm': dict(n_estimators=400, num_leaves=15, learning_rate=.06, subsample=.85,
+                     colsample_bytree=.85, reg_lambda=4.0, min_child_samples=100),
+    # Heavily regularised, class-weighted variant that won on calibration PR-AUC.
+    'lightgbm_reg': dict(n_estimators=800, num_leaves=7, learning_rate=.03, subsample=.8,
+                         colsample_bytree=.6, reg_lambda=20.0, min_child_samples=500),
+}
 
 
 def make_preprocess(numeric_cols):
@@ -32,162 +57,226 @@ def make_preprocess(numeric_cols):
                               ('categorical', categorical, CATEGORICAL)])
 
 
-def make_model(algo, spw, seed, device='cuda'):
-    if algo == 'xgboost':
-        from xgboost import XGBClassifier
-        return XGBClassifier(n_estimators=400, max_depth=4, learning_rate=.06,
-                             subsample=.85, colsample_bytree=.85, reg_lambda=4,
-                             objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
-                             scale_pos_weight=spw, random_state=seed, n_jobs=min(4, os.cpu_count() or 1),
-                             early_stopping_rounds=40, device=device)
-    if algo == 'lightgbm':
-        from lightgbm import LGBMClassifier, early_stopping, log_evaluation
-        return LGBMClassifier(n_estimators=400, max_depth=4, num_leaves=15, learning_rate=.06,
-                              subsample=.85, colsample_bytree=.85, reg_lambda=4,
-                              scale_pos_weight=spw, random_state=seed, n_jobs=min(4, os.cpu_count() or 1)), \
-               [early_stopping(40, verbose=False), log_evaluation(0)]
-    if algo == 'catboost':
-        from catboost import CatBoostClassifier
-        return CatBoostClassifier(iterations=400, depth=4, learning_rate=.06,
-                                  loss_function='Logloss', eval_metric='PRAUC',
-                                  class_weights=[1.0, float(spw)], random_state=seed,
-                                  od_type='Iter', od_wait=40, verbose=False, task_type=('GPU' if device == 'cuda' else 'CPU'))
-    raise ValueError(algo)
+def _ohe_member(name, preprocess, feature_cols, params, max_rounds, predict):
+    return {'name': name, 'max_rounds': max_rounds, 'params': params,
+            'transform': lambda frame: preprocess.transform(frame[feature_cols]),
+            'predict': predict}
 
 
-def run_fold(algo, feats, train_rows, fold_valid, features, seed, device='cpu'):
-    numeric_cols = FEATURE_SETS[feats][0]
-    y_fold = train_rows.fraud_bool.astype('int8')
-    pos = int(y_fold.sum())
-    spw = (len(y_fold) - pos) / pos
-    if algo == 'catboost_native':
-        # Native categorical handling: no OHE; numeric medians; raw category strings.
-        train = train_rows[features].copy()
-        valid = fold_valid[features].copy()
-        for col in numeric_cols:
-            med = train[col].median()
-            train[col] = train[col].fillna(med)
-            valid[col] = valid[col].fillna(med)
-        for col in CATEGORICAL:
-            train[col] = train[col].astype('string').fillna('__missing__').astype(str)
-            valid[col] = valid[col].astype('string').fillna('__missing__').astype(str)
-        from catboost import CatBoostClassifier
-        model = CatBoostClassifier(iterations=400, depth=4, learning_rate=.06,
-                                   loss_function='Logloss', eval_metric='PRAUC',
-                                   class_weights=[1.0, float(spw)], random_state=seed,
-                                   od_type='Iter', od_wait=40, verbose=False,
-                                   cat_features=list(range(len(numeric_cols), len(numeric_cols) + len(CATEGORICAL))),
+def _xgboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, device):
+    from xgboost import XGBClassifier
+    preprocess = make_preprocess(numeric_cols)
+    y = fit_rows.fraud_bool.astype('int8')
+    positive = int(y.sum())
+    spw = (len(y) - positive) / positive
+    params = dict(n_estimators=max_rounds, max_depth=4, learning_rate=.06, subsample=.85,
+                  colsample_bytree=.85, reg_lambda=4.0, scale_pos_weight=round(spw, 6))
+    model = XGBClassifier(**params, objective='binary:logistic', tree_method='hist',
+                          eval_metric='aucpr', random_state=seed, device=device,
+                          n_jobs=min(4, os.cpu_count() or 1))
+    model.fit(preprocess.fit_transform(fit_rows[feature_cols]), y, verbose=False)
+    return _ohe_member('xgboost', preprocess, feature_cols, params, max_rounds,
+                       lambda matrix, rounds: model.predict_proba(matrix, iteration_range=(0, rounds))[:, 1])
+
+
+def _catboost_member(fit_rows, feature_cols, numeric_cols, *, seed, max_rounds, device, native=False):
+    from catboost import CatBoostClassifier
+    y = fit_rows.fraud_bool.astype('int8')
+    positive = int(y.sum())
+    spw = (len(y) - positive) / positive
+    model_params = dict(iterations=max_rounds, depth=4, learning_rate=.06,
+                        class_weights=[1.0, round(float(spw), 6)])
+    params = dict(model_params, native_categorical=native)
+    if native:
+        medians = {col: float(fit_rows[col].median()) for col in numeric_cols}
+
+        def transform(frame):
+            out = frame[feature_cols].copy()
+            for col in numeric_cols:
+                out[col] = out[col].fillna(medians[col])
+            for col in CATEGORICAL:
+                out[col] = out[col].astype('string').fillna('__missing__').astype(str)
+            return out
+
+        cat_features = list(range(len(numeric_cols), len(numeric_cols) + len(CATEGORICAL)))
+        model = CatBoostClassifier(**model_params, loss_function='Logloss', random_state=seed,
+                                   verbose=False, allow_writing_files=False, cat_features=cat_features,
                                    task_type=('GPU' if device == 'cuda' else 'CPU'))
-        model.fit(train, y_fold, eval_set=(valid, fold_valid.fraud_bool.astype('int8')), verbose=False)
-        scores = model.predict_proba(valid)[:, 1]
-    elif algo == 'ensemble':
-        # Rank-averaged blend: XGBoost (v1 config) + CatBoost (native cats), same fold.
-        from catboost import CatBoostClassifier
-        from xgboost import XGBClassifier
-        pre = make_preprocess(numeric_cols)
-        x_tr = pre.fit_transform(train_rows[features])
-        x_va = pre.transform(fold_valid[features])
-        xgb = XGBClassifier(n_estimators=400, max_depth=4, learning_rate=.06,
-                            subsample=.85, colsample_bytree=.85, reg_lambda=4,
-                            objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
-                            scale_pos_weight=spw, random_state=seed,
-                            n_jobs=min(4, os.cpu_count() or 1), early_stopping_rounds=40, device=device)
-        xgb.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))], verbose=False)
-        xgb_scores = xgb.predict_proba(x_va)[:, 1]
-        tn = train_rows[features].copy()
-        vn = fold_valid[features].copy()
-        for col in numeric_cols:
-            med = tn[col].median()
-            tn[col] = tn[col].fillna(med)
-            vn[col] = vn[col].fillna(med)
-        for col in CATEGORICAL:
-            tn[col] = tn[col].astype('string').fillna('__missing__').astype(str)
-            vn[col] = vn[col].astype('string').fillna('__missing__').astype(str)
-        cb = CatBoostClassifier(iterations=400, depth=4, learning_rate=.06,
-                                loss_function='Logloss', eval_metric='PRAUC',
-                                class_weights=[1.0, float(spw)], random_state=seed,
-                                od_type='Iter', od_wait=40, verbose=False,
-                                cat_features=list(range(len(numeric_cols), len(numeric_cols) + len(CATEGORICAL))),
-                                task_type=('GPU' if device == 'cuda' else 'CPU'))
-        cb.fit(tn, y_fold, eval_set=(vn, fold_valid.fraud_bool.astype('int8')), verbose=False)
-        cb_scores = cb.predict_proba(vn)[:, 1]
-        ra = xgb_scores.argsort().argsort() / max(len(xgb_scores) - 1, 1)
-        rb = cb_scores.argsort().argsort() / max(len(cb_scores) - 1, 1)
-        scores = 0.5 * (ra + rb)
-    elif algo == 'lightgbm_fix':
-        pre = make_preprocess(numeric_cols)
-        from lightgbm import LGBMClassifier, early_stopping, log_evaluation
-        model = LGBMClassifier(n_estimators=400, max_depth=-1, num_leaves=31, learning_rate=.06,
-                               subsample=.85, colsample_bytree=.85, reg_lambda=4,
-                               is_unbalance=True, random_state=seed, n_jobs=min(4, os.cpu_count() or 1))
-        x_tr = pre.fit_transform(train_rows[features])
-        x_va = pre.transform(fold_valid[features])
-        model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))],
-                  eval_metric='average_precision',
-                  callbacks=[early_stopping(40, verbose=False), log_evaluation(0)])
-        scores = model.predict_proba(x_va)[:, 1]
+        model.fit(transform(fit_rows), y, verbose=False)
     else:
-        pre = make_preprocess(numeric_cols)
-        built = make_model(algo, spw, seed, device)
-        model, callbacks = (built, None) if algo != 'lightgbm' else built
-        x_tr = pre.fit_transform(train_rows[features])
-        x_va = pre.transform(fold_valid[features])
-        if algo == 'lightgbm':
-            model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))],
-                      eval_metric='aucpr', callbacks=callbacks)
-        elif algo == 'catboost':
-            model.fit(x_tr, y_fold, eval_set=(x_va, fold_valid.fraud_bool.astype('int8')), verbose=False)
-        else:
-            model.fit(x_tr, y_fold, eval_set=[(x_va, fold_valid.fraud_bool.astype('int8'))], verbose=False)
-        scores = model.predict_proba(x_va)[:, 1]
-    threshold, _ = threshold_analysis(fold_valid.fraud_bool, scores, 100)
-    m = metrics(fold_valid.fraud_bool, scores, threshold)
-    m.update(ranking_metrics(fold_valid.fraud_bool, scores))
-    return m
+        preprocess = make_preprocess(numeric_cols)
+        model = CatBoostClassifier(**model_params, loss_function='Logloss', random_state=seed,
+                                   verbose=False, allow_writing_files=False,
+                                   task_type=('GPU' if device == 'cuda' else 'CPU'))
+        model.fit(preprocess.fit_transform(fit_rows[feature_cols]), y, verbose=False)
+
+        def transform(frame):
+            return preprocess.transform(frame[feature_cols])
+
+    return {'name': 'catboost_native' if native else 'catboost', 'max_rounds': max_rounds,
+            'params': params, 'transform': transform,
+            'predict': lambda matrix, rounds: model.predict_proba(
+                matrix, ntree_start=0, ntree_end=rounds)[:, 1]}
+
+
+def _lightgbm_member(algo, fit_rows, feature_cols, numeric_cols, *, seed, device):
+    from lightgbm import LGBMClassifier
+    preprocess = make_preprocess(numeric_cols)
+    y = fit_rows.fraud_bool.astype('int8')
+    params = dict(LIGHTGBM_PARAMS[algo])
+    if algo == 'lightgbm_reg':
+        params['scale_pos_weight'] = round((len(y) - int(y.sum())) / int(y.sum()), 6)
+    model = LGBMClassifier(**params, random_state=seed, n_jobs=min(4, os.cpu_count() or 1), verbose=-1)
+    model.fit(preprocess.fit_transform(fit_rows[feature_cols]), y)
+    params['device'] = 'cpu'
+    return _ohe_member(algo, preprocess, feature_cols, params, params['n_estimators'],
+                       lambda matrix, rounds: model.predict_proba(matrix, num_iteration=rounds)[:, 1])
+
+
+def build_members(algo, fit_rows, feature_cols, numeric_cols, *, seed, device, max_rounds):
+    """Return (members, combination). A member is a fitted model plus a frozen-round scorer."""
+    if algo == 'xgboost':
+        return [_xgboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
+                                max_rounds=max_rounds, device=device)], None
+    if algo in {'catboost', 'catboost_native'}:
+        return [_catboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
+                                 max_rounds=max_rounds, device=device, native=algo == 'catboost_native')], None
+    if algo in LIGHTGBM_PARAMS:
+        return [_lightgbm_member(algo, fit_rows, feature_cols, numeric_cols, seed=seed, device=device)], None
+    if algo == 'ensemble':
+        return [_xgboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
+                                max_rounds=max_rounds, device=device),
+                _catboost_member(fit_rows, feature_cols, numeric_cols, seed=seed,
+                                 max_rounds=max_rounds, device=device, native=True)], 'rank_average'
+    raise ValueError(f'unknown algorithm {algo}')
+
+
+def _rank_average(score_list):
+    ranked = []
+    for scores in score_list:
+        order = np.argsort(np.argsort(scores, kind='stable'), kind='stable')
+        ranked.append(order / max(len(order) - 1, 1))
+    return np.mean(ranked, axis=0)
+
+
+def _combine(score_list, combination):
+    if combination is None:
+        return score_list[0]
+    if combination == 'rank_average':
+        return _rank_average(score_list)
+    raise ValueError(f'unknown combination {combination}')
+
+
+def _select_rounds(y_calibration, matrix, predict, max_rounds: int):
+    """Pick the round count maximising calibration PR-AUC; no external labels involved."""
+    grid = list(range(ROUND_GRID_STEP, max_rounds + 1, ROUND_GRID_STEP))
+    sweep, best_rounds, best_score = [], grid[0], -1.0
+    for rounds in grid:
+        score = float(average_precision_score(y_calibration, predict(matrix, rounds)))
+        sweep.append({'rounds': rounds, 'calibration_pr_auc': round(score, 6)})
+        if score > best_score:
+            best_rounds, best_score = rounds, score
+    return best_rounds, round(best_score, 6), sweep
+
+
+def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
+                  numeric_cols, *, seed, device, max_rounds, budget) -> dict:
+    started = time.perf_counter()
+    members, combination = build_members(algo, fit_rows, feature_cols, numeric_cols,
+                                         seed=seed, device=device, max_rounds=max_rounds)
+    fit_seconds = time.perf_counter() - started
+    y_calibration = calibration_rows.fraud_bool.to_numpy()
+    y_external = external_rows.fraud_bool.to_numpy()
+
+    matrices = {'calibration': [], 'external': []}
+    rounds, calibration = {}, {}
+    for member in members:
+        x_calibration = member['transform'](calibration_rows)
+        x_external = member['transform'](external_rows)
+        chosen, best_score, sweep = _select_rounds(y_calibration, x_calibration,
+                                                  member['predict'], member['max_rounds'])
+        rounds[member['name']] = chosen
+        calibration[member['name']] = {'selected_rounds': chosen,
+                                       'calibration_pr_auc': best_score,
+                                       'sweep': sweep}
+        matrices['calibration'].append(member['predict'](x_calibration, chosen))
+        matrices['external'].append(member['predict'](x_external, chosen))
+
+    threshold, selection = select_operating_point(
+        y_calibration, _combine(matrices['calibration'], combination), budget)
+    external = evaluate_external(y_external, _combine(matrices['external'], combination), threshold)
+    return {
+        'rounds': rounds, 'fit_seconds': round(float(fit_seconds), 3),
+        'selected_threshold': round(float(threshold), 6),
+        'selection': selection, 'calibration': calibration,
+        'params': {member['name']: member['params'] for member in members},
+        'combination': combination,
+        'external_metrics': external,
+    }
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--algos', nargs='+', default=['xgboost', 'lightgbm', 'catboost'])
-    parser.add_argument('--device', default='cuda')
+    parser.add_argument('--algos', nargs='+',
+                        default=['xgboost', 'catboost', 'catboost_native', 'lightgbm', 'lightgbm_reg', 'ensemble'])
+    parser.add_argument('--feature-sets', nargs='+', default=['v1'], choices=['v1', 'v2'])
+    parser.add_argument('--max-rounds', type=int, default=400)
+    parser.add_argument('--device', default='cpu')
+    parser.add_argument('--max-false-alerts-per-10000', type=float, default=100.0)
     args = parser.parse_args()
 
-    data = read_base(args.data)
-    data = add_engineered(data)
+    data = add_engineered(read_base(args.data))
     parts, boundaries = split_months(data)
     train_rows = parts[0]
     months = sorted(train_rows.month.unique().tolist())
+    folds = calibrated_folds(months)
     results = {}
-    for feats in ['v1', 'v2']:
-        features = FEATURE_SETS[feats][1]
+    for feats in args.feature_sets:
+        feature_cols, numeric_cols = FEATURE_SETS[feats][1], FEATURE_SETS[feats][0]
         for algo in args.algos:
             key = f'{algo}_{feats}'
-            results[key] = []
-            for k in range(3, len(months)):
-                fold_train = train_rows[train_rows.month.isin(months[:k])]
-                fold_valid = train_rows[train_rows.month == months[k]]
-                m = run_fold(algo, feats, fold_train, fold_valid, features, args.seed, args.device)
-                results[key].append({'valid_month': months[k], 'metrics': m})
-                print(f'{key} fold valid {months[k]}: PR-AUC {m["average_precision_pr_auc"]:.6f} '
-                      f'F1 {m["f1"]:.6f}', flush=True)
-    summary = {}
-    for key, folds in results.items():
-        mean = {k: round(float(np.mean([f['metrics'][k] for f in folds])), 6)
-                for k in folds[0]['metrics'] if isinstance(folds[0]['metrics'][k], (int, float))}
-        summary[key] = {'folds': [{k: (v if isinstance(v, (int, float)) else str(v)) for k, v in f['metrics'].items()}
-                                   | {'valid_month': f['valid_month']} for f in folds],
-                        'mean_metrics': mean}
-    report = {'mode': 'research-algorithms', 'trained_at_utc': datetime.now(timezone.utc).isoformat(),
-              'results': summary,
-              'note': 'Nominal GPU task_type used where available; penultimate/final months never touched.'}
+            fold_reports = []
+            for fold in folds:
+                fit_rows = train_rows[train_rows.month.isin(fold['train_months'])]
+                calibration_rows = train_rows[train_rows.month == fold['calibration_month']]
+                external_rows = train_rows[train_rows.month == fold['external_month']]
+                evaluation = evaluate_fold(
+                    algo, fit_rows, calibration_rows, external_rows, feature_cols,
+                    numeric_cols, seed=args.seed, device=args.device, max_rounds=args.max_rounds,
+                    budget=args.max_false_alerts_per_10000)
+                fold_reports.append({
+                    'train_months': fold['train_months'],
+                    'calibration_month': fold['calibration_month'],
+                    'external_month': fold['external_month'],
+                    'rows': {'train': len(fit_rows), 'calibration': len(calibration_rows),
+                             'external': len(external_rows)},
+                    'checksums': {'train': rows_fingerprint(fit_rows),
+                                  'calibration': rows_fingerprint(calibration_rows),
+                                  'external': rows_fingerprint(external_rows)},
+                    **evaluation,
+                })
+                external = evaluation['external_metrics']
+                print(f"{key} fold external {fold['external_month']}: "
+                      f"PR-AUC {external['average_precision_pr_auc']:.6f} "
+                      f"F1 {external['f1']:.6f} "
+                      f"FP/10k {external['false_alerts_per_10000_operations']:.1f} "
+                      f"rounds {evaluation['rounds']} ({evaluation['fit_seconds']:.1f}s)", flush=True)
+            results[key] = {'folds': fold_reports, 'mean_metrics': mean_external_metrics(fold_reports)}
+            print(key, 'mean PR-AUC', results[key]['mean_metrics']['average_precision_pr_auc'], flush=True)
+
+    report = {'mode': 'research-algorithms-calibrated', 'protocol': 'calibrated',
+              'trained_at_utc': datetime.now(timezone.utc).isoformat(), 'seed': args.seed,
+              'max_false_alerts_per_10000': args.max_false_alerts_per_10000,
+              'data_provenance': file_provenance(args.data),
+              'split_method': ('expanding month folds: train < calibration < external, strictly disjoint; '
+                               'rounds and threshold fixed on calibration; penultimate/final months untouched'),
+              'results': results}
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-    for key, r in summary.items():
-        print(key, 'mean PR-AUC', r['mean_metrics']['average_precision_pr_auc'],
-              'F1', r['mean_metrics']['f1'], flush=True)
+    print('wrote', args.output)
 
 
 if __name__ == '__main__':
