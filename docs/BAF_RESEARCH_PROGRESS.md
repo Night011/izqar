@@ -56,6 +56,59 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 - 2026-11-18 (late): final verdict recorded. BAF experimental endpoint `/api/v1/model/baf-candidate` added (read-only; metrics of research folds; 404 when absent). 147 tests passed. Ensemble NOT adopted (P@100 flat 0.5 vs XGB 0.46/0.50/0.50, within noise).
 - Recommendation: ship nothing new; document ceiling. Any further gains would need the verified streaming velocity pipeline (excluded by Stage 4) or stronger raw signals.
 
+## Stage 7 — corrected evaluation protocol (validity fix)
+
+Problem: `threshold_analysis(fold_valid.fraud_bool, scores, 100)` chose the operating point on the same fold it reported, so FP/10k ≈ 99.6 was guaranteed by construction. Same fold also drove early stopping.
+
+Protocol (`backend/scripts/baf_protocol.py`, `--protocol calibrated`): for external month *m*, fit on months < *m*−1, choose **both** the round count and the threshold on month *m*−1, score month *m* once with both frozen. `--protocol infold` reproduces the old layout and is labelled optimistic in the artifact. Months 6/7 never enter selection. Regression tests: `backend/tests/test_baf_protocol.py` (8 tests; **155 backend tests pass**; CI remains blocked by the GitHub Actions billing lock).
+
+XGBoost v1, calibrated (`docs/baf_calibrated_v1.metrics.json`):
+
+| External fold | Train / cal | PR-AUC | ROC | P@100 | P@1000 | Recall | F1 | FP/10k (frozen) | FP/10k on cal | Rounds |
+|---|---|---|---|---|---|---|---|---|---|---|
+| m3 | m0–1 / m2 | 0.137190 | 0.9043 | 0.45 | 0.226 | 0.3621 | 0.2016 | **205.7** | 99.87 | 304 |
+| m4 | m0–2 / m3 | 0.156176 | 0.8998 | 0.46 | 0.260 | 0.2417 | 0.2190 | **109.9** | 99.18 | 264 |
+| m5 | m0–3 / m4 | 0.166224 | 0.8853 | 0.48 | 0.298 | 0.1906 | 0.2350 | 51.0 | 99.77 | 228 |
+| mean | | 0.153197 | 0.8965 | 0.463 | 0.261 | 0.2648 | 0.2185 | **122.2** | 99.6 | |
+
+Comparison with the in-fold protocol (old, optimistic): mean PR-AUC 0.1565, F1 0.2266, FP/10k 99.6.
+
+- Ranking quality is unchanged: P@100 0.45/0.46/0.48 and P@1000 0.226/0.260/0.298 match the old 0.46/0.50/0.50 and 0.230/0.257/0.291 within noise. The old optimism was **entirely in the operating point**, not in the model.
+- With a genuinely pre-registered threshold the 100 FP/10k budget is breached on 2 of 3 folds (205.7, 109.9) while calibration itself is always ≈99.7 — the score distribution shifts between months (fraud rate 0.92%→1.18%).
+- Post-hoc recall at 50/75/100 FP/10k on the external folds (diagnostic; recalibrating per period needs labels): 0.159/0.197/0.233 · 0.168/0.196/0.236 · 0.190/0.238/0.266.
+- Fold m3 now trains on 260k rows instead of 397k (the extra month became calibration), so its PR-AUC is slightly lower; this is the honest cost of the protocol.
+
+## Stage 7b — algorithm comparison under the corrected protocol (run B)
+
+`docs/baf_calibrated_algos_v1.metrics.json` — 6 arms × 3 calibrated folds, identical periods, identical selection rule (rounds and threshold on the calibration month only), v1 features.
+
+| Arm | PR-AUC (f3/f4/f5) | Mean PR-AUC | Mean F1 | FP/10k frozen (f3/f4/f5) | Recall@100 post-hoc | P@1000 (f3/f4/f5) | Rounds | Fit s (f5) |
+|---|---|---|---|---|---|---|---|---|
+| catboost (OHE) | .1392/.1623/.1657 | **0.1558** | 0.2186 | 212.9/106.9/52.5 | .239/.233/.262 | .223/.253/.291 | 350/275/350 | 52 |
+| ensemble xgb+cb_native | .1399/.1598/.1670 | **0.1556** | **0.2258** | **98.2/95.6/96.1** | .237/.233/.264 | .230/.260/.297 | 300/400 · 250/375 · 200/400 | 180 |
+| catboost_native | .1394/.1594/.1648 | 0.1545 | 0.2213 | 210.7/104.8/50.5 | .236/.234/.262 | .230/.253/.288 | 400/375/400 | 177 |
+| lightgbm_reg | .1365/.1582/.1677 | 0.1541 | 0.2195 | 202.5/107.4/49.6 | .242/.238/.261 | .222/.261/.289 | 750/800/800 | 29 |
+| xgboost v1 | .1372/.1565/.1652 | 0.1529 | 0.2199 | 204.3/109.9/51.4 | .233/.233/.264 | .226/.262/.297 | 300/250/200 | 33 |
+| lightgbm (unweighted) | .1312/.1568/.1608 | 0.1496 | 0.2163 | 207.2/108.0/51.8 | .241/.238/.265 | .218/.251/.286 | 250/200/150 | 20 |
+
+Conclusions:
+
+- **No arm separates on ranking.** PR-AUC spans 0.1496–0.1558 with per-fold spread ≈0.01; P@1000 and post-hoc recall@100 are within ±0.01 for all six. Algorithm choice is not the bottleneck; the v1 feature signal is. This is a measured plateau over 6 configurations, 3 folds and one dataset variant — not a proven ceiling.
+- **The old optimism was the operating point, not the model.** Five arms breach 100 FP/10k on folds m3/m4 (200–213 / 105–110) while their calibration months sit at ≈99.7. A probability threshold fitted on one month does not transport to the next (fraud rate 0.92%→1.18%).
+- **Ensemble is the only arm inside the budget on all folds (98.2/95.6/96.1).** Cause: rank averaging makes the score distribution uniform, so the calibration threshold is effectively a within-batch quantile. That is *not* available for single-request scoring without a rolling reference window — so its operating-point advantage is batch-dependent and not adopted.
+- **LightGBM is not broken.** Root cause of the old 0.052: `eval_metric='aucpr'` is an XGBoost name, LightGBM ignored it and monitored weighted `binary_logloss`, which rises by construction under `scale_pos_weight`; early stopping kept round 1 and LightGBM discarded every later tree (`current_iteration() == 1`). With explicit round selection on calibration PR-AUC, LightGBM reaches 0.1496 (unweighted) and 0.1541 (regularised), i.e. parity.
+
+Verdict: research stage BAF closed on the current feature contract. No configuration beats the baseline beyond noise; nothing is promoted to production, and the production artifact is untouched. Remaining headroom needs new admissible signals (a verified streaming velocity pipeline), not more tuning.
+
+Reproduction (local, `backend/data/baf/Base.csv`, venv with xgboost 3.4.1 / lightgbm 4.7.0 / catboost 1.2.10 / sklearn 1.9.1):
+
+```powershell
+python backend/scripts/train_baf.py --data backend/data/baf/Base.csv --output models/experiments/baf_calibrated_v1.metrics.json --mode research --protocol calibrated --feature-set v1 --estimators 400 --early-stopping-rounds 40
+python backend/scripts/research_baf_algorithms.py --data backend/data/baf/Base.csv --output models/experiments/baf_calibrated_algos_v1.metrics.json --algos xgboost catboost catboost_native lightgbm lightgbm_reg ensemble --feature-sets v1 --max-rounds 400 --device cpu
+```
+
+Each fold report carries train/calibration/external months, row counts, per-period row-index sha256, best iteration, fit seconds, selected threshold, calibration sweep and full confusion matrix.
+
 ## Log
 
 - 2026-11-18: Audit done; Base.csv downloaded locally (1,000,000 rows; 1.103% fraud; months 0–7; train [0–5], valid 6, test 7 — test never used for tuning).
