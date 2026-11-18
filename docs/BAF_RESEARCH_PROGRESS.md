@@ -50,9 +50,11 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 | catboost native (no OHE) v1 / v2 | 0.1556 / 0.1562 | 0.143/0.162/0.167 | parity (no gain vs OHE) |
 | lightgbm v1/v2 (SPW or is_unbalance) | 0.052 | 0.048/0.052/0.057 | BROKEN arm — early-stops at iter 1; even tuned (is_unbalance, depth=-1, leaves=31) PR-AUC 0.053. Dropped, documented as LightGBM failing on this workload/config, not on LightGBM per se |
 | velocity headroom (v2 + 7 aggs) | 0.1737 | 0.154/0.178/0.189 | NOT eligible (Stage 4) |
-| XGB+CatBoost rank-average ensemble | pending (PID 19752) | — | — |
+| XGB+CatBoost rank-average ensemble | 0.1579 (v1) / 0.1571 (v2) | 0.143/0.163/0.167 | parity — NOT adopted (no gain ≥ error) |
+| **Decision**: no admissible configuration beats XGBoost-v1 on internal folds. Ceiling ≈ 0.156–0.158 mean PR-AUC across the best three arms. Baseline model stands. |
 
-Kaggle GPU and local CPU agree on catboost/lightgbm parity. No config beats v1-XGBoost significantly; current optimum = XGBoost v1 family within noise.
+- 2026-11-18 (late): final verdict recorded. BAF experimental endpoint `/api/v1/model/baf-candidate` added (read-only; metrics of research folds; 404 when absent). 147 tests passed. Ensemble NOT adopted (P@100 flat 0.5 vs XGB 0.46/0.50/0.50, within noise).
+- Recommendation: ship nothing new; document ceiling. Any further gains would need the verified streaming velocity pipeline (excluded by Stage 4) or stronger raw signals.
 
 ## Log
 

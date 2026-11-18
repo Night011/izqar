@@ -1,0 +1,201 @@
+{
+  "mode": "research",
+  "feature_set": "v1",
+  "trained_at_utc": "2026-11-18T14:50:06.755737+00:00",
+  "n_estimators": 400,
+  "positive_weight_multiplier": 1.0,
+  "early_stopping_rounds": 40,
+  "max_false_alerts_per_10000": 100,
+  "split_method": "expanding month folds within the train region; penultimate/final months untouched",
+  "excluded_for_leakage": [
+    "fraud_bool",
+    "month",
+    "device_fraud_count",
+    "days_since_request",
+    "credit_risk_score",
+    "unverified historical aggregates"
+  ],
+  "folds": [
+    {
+      "train_months": [
+        0,
+        1,
+        2
+      ],
+      "valid_month": 3,
+      "train_rows": 397039,
+      "valid_rows": 150936,
+      "best_iteration": 263,
+      "threshold": 0.939336,
+      "metrics": {
+        "average_precision_pr_auc": 0.141364,
+        "roc_auc": 0.90623,
+        "precision": 0.18286,
+        "recall": 0.240661,
+        "f1": 0.207816,
+        "confusion_matrix_tn_fp_fn_tp": [
+          148047,
+          1497,
+          1057,
+          335
+        ],
+        "false_positive_rate": 0.01001,
+        "false_negative_rate": 0.759339,
+        "false_alerts_per_10000_operations": 99.181,
+        "cases": 150936,
+        "fraud_cases": 1392,
+        "100": {
+          "alerts": 100,
+          "precision_at_k": 0.46,
+          "recall_at_k": 0.033046,
+          "true_positives_at_k": 46
+        },
+        "500": {
+          "alerts": 500,
+          "precision_at_k": 0.268,
+          "recall_at_k": 0.096264,
+          "true_positives_at_k": 134
+        },
+        "1000": {
+          "alerts": 1000,
+          "precision_at_k": 0.23,
+          "recall_at_k": 0.16523,
+          "true_positives_at_k": 230
+        }
+      }
+    },
+    {
+      "train_months": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "valid_month": 4,
+      "train_rows": 547975,
+      "valid_rows": 127691,
+      "best_iteration": 227,
+      "threshold": 0.934809,
+      "metrics": {
+        "average_precision_pr_auc": 0.160951,
+        "roc_auc": 0.90088,
+        "precision": 0.209187,
+        "recall": 0.232094,
+        "f1": 0.220046,
+        "confusion_matrix_tn_fp_fn_tp": [
+          124965,
+          1274,
+          1115,
+          337
+        ],
+        "false_positive_rate": 0.010092,
+        "false_negative_rate": 0.767906,
+        "false_alerts_per_10000_operations": 99.772,
+        "cases": 127691,
+        "fraud_cases": 1452,
+        "100": {
+          "alerts": 100,
+          "precision_at_k": 0.5,
+          "recall_at_k": 0.034435,
+          "true_positives_at_k": 50
+        },
+        "500": {
+          "alerts": 500,
+          "precision_at_k": 0.338,
+          "recall_at_k": 0.116391,
+          "true_positives_at_k": 169
+        },
+        "1000": {
+          "alerts": 1000,
+          "precision_at_k": 0.257,
+          "recall_at_k": 0.176997,
+          "true_positives_at_k": 257
+        }
+      }
+    },
+    {
+      "train_months": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "valid_month": 5,
+      "train_rows": 675666,
+      "valid_rows": 119323,
+      "best_iteration": 315,
+      "threshold": 0.912754,
+      "metrics": {
+        "average_precision_pr_auc": 0.167087,
+        "roc_auc": 0.886636,
+        "precision": 0.239617,
+        "recall": 0.265769,
+        "f1": 0.252016,
+        "confusion_matrix_tn_fp_fn_tp": [
+          116722,
+          1190,
+          1036,
+          375
+        ],
+        "false_positive_rate": 0.010092,
+        "false_negative_rate": 0.734231,
+        "false_alerts_per_10000_operations": 99.729,
+        "cases": 119323,
+        "fraud_cases": 1411,
+        "100": {
+          "alerts": 100,
+          "precision_at_k": 0.5,
+          "recall_at_k": 0.035436,
+          "true_positives_at_k": 50
+        },
+        "500": {
+          "alerts": 500,
+          "precision_at_k": 0.348,
+          "recall_at_k": 0.123317,
+          "true_positives_at_k": 174
+        },
+        "1000": {
+          "alerts": 1000,
+          "precision_at_k": 0.291,
+          "recall_at_k": 0.206237,
+          "true_positives_at_k": 291
+        }
+      }
+    }
+  ],
+  "mean_metrics": {
+    "average_precision_pr_auc": 0.156467,
+    "roc_auc": 0.897915,
+    "precision": 0.210555,
+    "recall": 0.246175,
+    "f1": 0.226626,
+    "false_positive_rate": 0.010065,
+    "false_negative_rate": 0.753825,
+    "false_alerts_per_10000_operations": 99.560667,
+    "cases": 132650.0,
+    "fraud_cases": 1418.333333
+  },
+  "features": [
+    "income",
+    "name_email_similarity",
+    "prev_address_months_count",
+    "current_address_months_count",
+    "customer_age",
+    "intended_balcon_amount",
+    "proposed_credit_limit",
+    "session_length_in_minutes",
+    "bank_months_count",
+    "email_is_free",
+    "phone_home_valid",
+    "phone_mobile_valid",
+    "has_other_cards",
+    "foreign_request",
+    "keep_alive_session",
+    "payment_type",
+    "employment_status",
+    "housing_status",
+    "source",
+    "device_os"
+  ]
+}
