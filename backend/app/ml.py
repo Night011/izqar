@@ -329,16 +329,20 @@ def predict_ieee(features: dict):
     if artifact is None:
         return None
     expected = artifact['features']
-    missing = sorted(set(expected) - set(features))
+    from . import ieee_freq
+    freq_feats = [f for f in (artifact.get('freq_sources') or {}) if f in expected]
+    missing = sorted(set(expected) - set(features) - set(freq_feats))
     unknown = sorted(set(features) - set(expected))
     if missing or unknown:
         raise ValueError(f'IEEE-CIS schema mismatch; missing: {missing}; unsupported: {unknown}')
-    record = {key: features[key] for key in expected}
+    record = {key: features.get(key) for key in expected}
     import pandas as pd
     frame = pd.DataFrame([record], columns=expected)
+    if any(f in expected for f in artifact.get('freq_sources', ieee_freq.FREQ_SOURCES)):
+        frame = ieee_freq.add_freq_features(frame, artifact, scale=artifact.get('freq_scale', 'log'))
     for col in artifact['numerical_features']:
         frame[col] = pd.to_numeric(frame[col], errors='coerce')
-        if features[col] is not None and pd.isna(frame[col].iloc[0]):
+        if features.get(col) is not None and pd.isna(frame[col].iloc[0]):
             raise ValueError(f'{col} must be numeric or null')
     for col in artifact['categorical_features']:
         frame[col] = frame[col].astype('string').fillna('__missing__').astype(str)
@@ -406,7 +410,7 @@ def predict_baf(features: dict):
     frame = pd.DataFrame([{name: features[name] for name in expected}], columns=expected)
     for col in artifact['numerical_features']:
         frame[col] = pd.to_numeric(frame[col], errors='coerce')
-        if features[col] is not None and pd.isna(frame[col].iloc[0]):
+        if features.get(col) is not None and pd.isna(frame[col].iloc[0]):
             raise ValueError(f'{col} must be numeric or null')
     for col in ('prev_address_months_count', 'current_address_months_count',
                 'bank_months_count', 'session_length_in_minutes'):

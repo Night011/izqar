@@ -39,6 +39,10 @@ def check(path: Path) -> dict:
     if not (0.0 <= float(artifact.get('threshold', -1)) <= 1.0):
         errors.append('threshold outside [0, 1]')
     if not errors:
+        freq_sources = artifact.get('freq_sources') or {}
+        freq_feats = [f for f in features if f in freq_sources]
+        if freq_feats and not artifact.get('freq_state'):
+            errors.append(f'freq features {freq_feats} present but freq_state is missing; inference cannot reproduce them')
         row = {key: np.nan for key in features}
         for key in cats:
             row[key] = '__missing__'

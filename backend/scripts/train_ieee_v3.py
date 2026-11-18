@@ -76,6 +76,16 @@ def add_engineered(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _train_freq_state(train_rows: pd.DataFrame) -> dict[str, dict[str, int]]:
+    state: dict[str, dict[str, int]] = {}
+    for name, cols in FREQ_SOURCES.items():
+        if any(col not in train_rows.columns for col in cols):
+            continue
+        key = freq_key(train_rows, cols)
+        state[name] = {str(k): int(v) for k, v in key.value_counts().items()}
+    return state
+
+
 def freq_key(df: pd.DataFrame, cols: list[str]) -> pd.Series:
     if len(cols) > 1:
         return df[cols].astype('string').fillna('__missing__').agg('_'.join, axis=1)
@@ -263,6 +273,9 @@ def run_final(data: pd.DataFrame, args, t0: float):
         'numerical_features': nums,
         'categorical_features': cats,
         'freq_mode': args.freq,
+        'freq_sources': FREQ_SOURCES if args.freq != 'none' else {},
+        'freq_scale': 'log' if args.freq == 'causal_log' else 'linear',
+        'freq_state': _train_freq_state(train_rows) if args.freq != 'none' else {},
         'threshold': threshold,
         'validation_metrics': validation_metrics,
         'test_metrics': test_metrics,
