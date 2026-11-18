@@ -1,0 +1,141 @@
+{
+  "mode": "research-algorithms",
+  "trained_at_utc": "2026-11-18T16:49:31.921746+00:00",
+  "results": {
+    "ensemble_v1": {
+      "folds": [
+        {
+          "average_precision_pr_auc": 0.143277,
+          "roc_auc": 0.907772,
+          "precision": 0.184424,
+          "recall": 0.244971,
+          "f1": 0.210429,
+          "confusion_matrix_tn_fp_fn_tp": "[148036, 1508, 1051, 341]",
+          "false_positive_rate": 0.010084,
+          "false_negative_rate": 0.755029,
+          "false_alerts_per_10000_operations": 99.91,
+          "cases": 150936,
+          "fraud_cases": 1392,
+          "100": "{'alerts': 100, 'precision_at_k': 0.5, 'recall_at_k': 0.03592, 'true_positives_at_k': 50}",
+          "500": "{'alerts': 500, 'precision_at_k': 0.29, 'recall_at_k': 0.104167, 'true_positives_at_k': 145}",
+          "1000": "{'alerts': 1000, 'precision_at_k': 0.233, 'recall_at_k': 0.167385, 'true_positives_at_k': 233}",
+          "valid_month": 3
+        },
+        {
+          "average_precision_pr_auc": 0.162957,
+          "roc_auc": 0.902229,
+          "precision": 0.213712,
+          "recall": 0.238292,
+          "f1": 0.225334,
+          "confusion_matrix_tn_fp_fn_tp": "[124966, 1273, 1106, 346]",
+          "false_positive_rate": 0.010084,
+          "false_negative_rate": 0.761708,
+          "false_alerts_per_10000_operations": 99.694,
+          "cases": 127691,
+          "fraud_cases": 1452,
+          "100": "{'alerts': 100, 'precision_at_k': 0.5, 'recall_at_k': 0.034435, 'true_positives_at_k': 50}",
+          "500": "{'alerts': 500, 'precision_at_k': 0.344, 'recall_at_k': 0.118457, 'true_positives_at_k': 172}",
+          "1000": "{'alerts': 1000, 'precision_at_k': 0.25, 'recall_at_k': 0.172176, 'true_positives_at_k': 250}",
+          "valid_month": 4
+        },
+        {
+          "average_precision_pr_auc": 0.167477,
+          "roc_auc": 0.88658,
+          "precision": 0.239464,
+          "recall": 0.265769,
+          "f1": 0.251931,
+          "confusion_matrix_tn_fp_fn_tp": "[116721, 1191, 1036, 375]",
+          "false_positive_rate": 0.010101,
+          "false_negative_rate": 0.734231,
+          "false_alerts_per_10000_operations": 99.813,
+          "cases": 119323,
+          "fraud_cases": 1411,
+          "100": "{'alerts': 100, 'precision_at_k': 0.5, 'recall_at_k': 0.035436, 'true_positives_at_k': 50}",
+          "500": "{'alerts': 500, 'precision_at_k': 0.352, 'recall_at_k': 0.124734, 'true_positives_at_k': 176}",
+          "1000": "{'alerts': 1000, 'precision_at_k': 0.293, 'recall_at_k': 0.207654, 'true_positives_at_k': 293}",
+          "valid_month": 5
+        }
+      ],
+      "mean_metrics": {
+        "average_precision_pr_auc": 0.157904,
+        "roc_auc": 0.89886,
+        "precision": 0.212533,
+        "recall": 0.249677,
+        "f1": 0.229231,
+        "false_positive_rate": 0.01009,
+        "false_negative_rate": 0.750323,
+        "false_alerts_per_10000_operations": 99.805667,
+        "cases": 132650.0,
+        "fraud_cases": 1418.333333
+      }
+    },
+    "ensemble_v2": {
+      "folds": [
+        {
+          "average_precision_pr_auc": 0.142585,
+          "roc_auc": 0.907864,
+          "precision": 0.181226,
+          "recall": 0.239943,
+          "f1": 0.206491,
+          "confusion_matrix_tn_fp_fn_tp": "[148035, 1509, 1058, 334]",
+          "false_positive_rate": 0.010091,
+          "false_negative_rate": 0.760057,
+          "false_alerts_per_10000_operations": 99.976,
+          "cases": 150936,
+          "fraud_cases": 1392,
+          "100": "{'alerts': 100, 'precision_at_k': 0.5, 'recall_at_k': 0.03592, 'true_positives_at_k': 50}",
+          "500": "{'alerts': 500, 'precision_at_k': 0.296, 'recall_at_k': 0.106322, 'true_positives_at_k': 148}",
+          "1000": "{'alerts': 1000, 'precision_at_k': 0.229, 'recall_at_k': 0.164511, 'true_positives_at_k': 229}",
+          "valid_month": 3
+        },
+        {
+          "average_precision_pr_auc": 0.160993,
+          "roc_auc": 0.902427,
+          "precision": 0.214507,
+          "recall": 0.238292,
+          "f1": 0.225775,
+          "confusion_matrix_tn_fp_fn_tp": "[124972, 1267, 1106, 346]",
+          "false_positive_rate": 0.010037,
+          "false_negative_rate": 0.761708,
+          "false_alerts_per_10000_operations": 99.224,
+          "cases": 127691,
+          "fraud_cases": 1452,
+          "100": "{'alerts': 100, 'precision_at_k': 0.47, 'recall_at_k': 0.032369, 'true_positives_at_k': 47}",
+          "500": "{'alerts': 500, 'precision_at_k': 0.326, 'recall_at_k': 0.112259, 'true_positives_at_k': 163}",
+          "1000": "{'alerts': 1000, 'precision_at_k': 0.257, 'recall_at_k': 0.176997, 'true_positives_at_k': 257}",
+          "valid_month": 4
+        },
+        {
+          "average_precision_pr_auc": 0.167826,
+          "roc_auc": 0.885941,
+          "precision": 0.244246,
+          "recall": 0.27073,
+          "f1": 0.256807,
+          "confusion_matrix_tn_fp_fn_tp": "[116730, 1182, 1029, 382]",
+          "false_positive_rate": 0.010024,
+          "false_negative_rate": 0.72927,
+          "false_alerts_per_10000_operations": 99.059,
+          "cases": 119323,
+          "fraud_cases": 1411,
+          "100": "{'alerts': 100, 'precision_at_k': 0.48, 'recall_at_k': 0.034018, 'true_positives_at_k': 48}",
+          "500": "{'alerts': 500, 'precision_at_k': 0.344, 'recall_at_k': 0.121899, 'true_positives_at_k': 172}",
+          "1000": "{'alerts': 1000, 'precision_at_k': 0.283, 'recall_at_k': 0.200567, 'true_positives_at_k': 283}",
+          "valid_month": 5
+        }
+      ],
+      "mean_metrics": {
+        "average_precision_pr_auc": 0.157135,
+        "roc_auc": 0.898744,
+        "precision": 0.213326,
+        "recall": 0.249655,
+        "f1": 0.229691,
+        "false_positive_rate": 0.010051,
+        "false_negative_rate": 0.750345,
+        "false_alerts_per_10000_operations": 99.419667,
+        "cases": 132650.0,
+        "fraud_cases": 1418.333333
+      }
+    }
+  },
+  "note": "Nominal GPU task_type used where available; penultimate/final months never touched."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "hoogle57/izqar-baf-algorithms-gpu-v1",
+  "title": "IZQAR BAF Algorithms GPU v1",
+  "code_file": "izqar-baf-algos-gpu-v1.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "sgpjesus/bank-account-fraud-dataset-neurips-2022"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

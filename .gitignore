@@ -16,3 +16,6 @@ frontend/*.tsbuildinfo
 
 # Local training artifacts (worktree root)
 /models/
+
+# CatBoost training metadata
+catboost_info/
