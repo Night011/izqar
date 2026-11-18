@@ -33,6 +33,10 @@ Worktree: `C:\Users\a\Documents\IZQAR-BAF`, branch `feat/baf-research` (from `or
 
 - Kaggle GPU kernel `hoogle57/izqar-baf-algorithms-gpu-v1` (rev 97ebd1b): XGBoost vs LightGBM vs CatBoost × v1/v2 on identical folds. Status: QUEUED.
 - Controlled local arm: v1 with max_depth=6 (only change vs v1) — running (PID 5244).
+- max_depth=6 REJECTED: mean PR-AUC 0.1517 (0.1361/0.1551/0.1639) vs v1 0.1565.
+- lr=0.03, 800 trees, early stop 60 — REJECTED: mean PR-AUC 0.1558 (0.1404/0.1593/0.1678) vs v1 0.1565. baseline plateau persists.
+- Threshold drift across months: 0.939 (m3) → 0.935 (m4) → 0.913 (m5) with fraud-rate 0.92%→1.18%; fixed threshold not stable — budget-aware per-month recalibration is appropriate.
+- Kaggle kernel QUEUED ~50+ min without diagnostics; local fallback: isolated venv (temp) with lightgbm+catboost for identical folds.
 
 ## Log
 
