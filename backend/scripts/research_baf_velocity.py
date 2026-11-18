@@ -45,7 +45,8 @@ def main():
     raw = pd.read_csv(args.data, usecols=VELOCITY, dtype='float32')
     data = pd.concat([data.reset_index(drop=True), raw.reset_index(drop=True)], axis=1)
     data = add_engineered(data)
-    train_rows, _, _ = split_months(data)
+    parts, boundaries = split_months(data)
+    train_rows = parts[0]
     months = sorted(train_rows.month.unique().tolist())
     folds = []
     for k in range(3, len(months)):

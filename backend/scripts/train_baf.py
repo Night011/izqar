@@ -107,7 +107,7 @@ def split_months(data: pd.DataFrame):
 
 def run_research(train_rows: pd.DataFrame, boundaries: dict, n_estimators: int,
                  max_false_alerts_per_10000: float | None, positive_weight_multiplier: float,
-                 early_stopping_rounds: int | None, feature_set: str, output: Path):
+                 early_stopping_rounds: int | None, feature_set: str, output: Path, max_depth: int = 4):
     """Expanding month folds over the *train region only*. Penultimate month (validation)
     and the last month (final test) are never touched; no artifact is written."""
     numeric_cols, feature_cols = FEATURE_SETS[feature_set]
@@ -126,7 +126,7 @@ def run_research(train_rows: pd.DataFrame, boundaries: dict, n_estimators: int,
                                           ('categorical', categorical, CATEGORICAL)])
         y_fold = fold_train.fraud_bool.astype('int8')
         pos = int(y_fold.sum())
-        model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.06,
+        model = XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=.06,
                               subsample=.85, colsample_bytree=.85, reg_lambda=4,
                               objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
                               scale_pos_weight=((len(y_fold) - pos) / pos) * positive_weight_multiplier,
@@ -172,7 +172,7 @@ def run_research(train_rows: pd.DataFrame, boundaries: dict, n_estimators: int,
 def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows: int | None = None,
           mode: str = 'experiment', max_false_alerts_per_10000: float | None = 100,
           positive_weight_multiplier: float = 1.0, early_stopping_rounds: int | None = None,
-          feature_set: str = 'v1'):
+          feature_set: str = 'v1', max_depth: int = 4):
     if mode not in {'experiment', 'final', 'research'}:
         raise ValueError('Use experiment, final or research mode')
     if feature_set not in FEATURE_SETS:
@@ -196,7 +196,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     (train_rows, validation_rows, test_rows), boundaries = split_months(data)
     if mode == 'research':
         return run_research(train_rows, boundaries, n_estimators, max_false_alerts_per_10000,
-                            positive_weight_multiplier, early_stopping_rounds, feature_set, output)
+                            positive_weight_multiplier, early_stopping_rounds, feature_set, output, max_depth)
     original_train_count = len(train_rows)
     if max_train_rows is not None:
         train_rows = train_rows.iloc[:max_train_rows]
@@ -207,7 +207,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
         split_method='month train/validation/final-test; final test omitted in experiment mode', mode=mode,
         hyperparameters={'n_estimators': n_estimators, 'max_train_rows': max_train_rows,
                          'max_false_alerts_per_10000': max_false_alerts_per_10000,
-                         'max_depth': 4, 'learning_rate': .06, 'feature_set': feature_set,
+                         'max_depth': max_depth, 'learning_rate': .06, 'feature_set': feature_set,
                          'positive_weight_multiplier': positive_weight_multiplier,
                          'early_stopping_rounds': early_stopping_rounds},
     )
@@ -217,7 +217,7 @@ def train(data_path: Path, output: Path, n_estimators: int = 180, max_train_rows
     preprocessing = ColumnTransformer([('numeric', numeric, numeric_cols), ('categorical', categorical, CATEGORICAL)])
     y_train = train_rows.fraud_bool.astype('int8')
     pos = int(y_train.sum())
-    model = XGBClassifier(n_estimators=n_estimators, max_depth=4, learning_rate=.06,
+    model = XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=.06,
                           subsample=.85, colsample_bytree=.85, reg_lambda=4,
                           objective='binary:logistic', tree_method='hist', eval_metric='aucpr',
                           scale_pos_weight=((len(y_train) - pos) / pos) * positive_weight_multiplier,
@@ -304,6 +304,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--mode', choices=['experiment', 'final', 'research'], default='experiment')
     parser.add_argument('--feature-set', choices=['v1', 'v2'], default='v1')
+    parser.add_argument('--max-depth', type=int, default=4)
     parser.add_argument('--estimators', type=int, default=180)
     parser.add_argument('--max-train-rows', type=int)
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100)
@@ -314,7 +315,7 @@ def main():
     args = parser.parse_args()
     train(args.data, args.output, args.estimators, args.max_train_rows, args.mode,
           args.max_false_alerts_per_10000, args.positive_weight_multiplier,
-          args.early_stopping_rounds, args.feature_set)
+          args.early_stopping_rounds, args.feature_set, args.max_depth)
 
 
 if __name__ == '__main__':
