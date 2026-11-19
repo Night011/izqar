@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from train_paysim import choose_type_thresholds, compare_threshold_policies  # noqa: E402
@@ -54,5 +55,23 @@ def test_policy_comparison_uses_disjoint_halves():
     rows.loc[rows.index[rows.index % 1000 == 0], 'isFraud'] = 1
     report = compare_threshold_policies(rows, scores)
     assert report['fit_rows'] + report['holdout_rows'] == len(rows)
-    assert report['holdout_global']['confusion_matrix_tn_fp_fn_tp'][0] > 0
+    assert report['holdout_global_f1']['confusion_matrix_tn_fp_fn_tp'][0] > 0
     assert 'per_type_thresholds' in report
+    # every policy is measured on rows it was not fitted on
+    assert all(report[key]['confusion_matrix_tn_fp_fn_tp'][0] >= 0
+               for key in ('holdout_global_f1', 'holdout_global_budget', 'holdout_per_type'))
+
+
+def test_cutoff_for_budget_cuts_below_the_budgeted_false_alerts():
+    from train_paysim import cutoff_for_budget
+
+    y = np.array([1, 0, 0, 0, 1, 0, 0, 0, 0, 0])
+    scores = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0])
+    # a budget of zero eaten FPs still admits the top fraud with no false alert
+    assert cutoff_for_budget(y, scores, 100.0) == pytest.approx(0.9)
+    # the second fraud sits below two false alerts, so a one-FP budget keeps the same cutoff
+    assert cutoff_for_budget(y, scores, 1250.0) == pytest.approx(0.9)
+    # the second fraud sits below three false alerts, so only a 3/8 budget reaches it
+    assert cutoff_for_budget(y, scores, 2500.0) == pytest.approx(0.9)
+    assert cutoff_for_budget(y, scores, 3750.0) == pytest.approx(0.5)
+    assert cutoff_for_budget(np.zeros(10, dtype=int), scores) is None

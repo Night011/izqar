@@ -121,6 +121,26 @@ def choose_threshold(y_true, scores):
     return float(thresholds[int(np.argmax(f1))])
 
 
+def cutoff_for_budget(y_true, scores, budget_per_10k: float = 100.0) -> float | None:
+    """Highest-score-first cutoff that maximises recall inside a false-alert budget."""
+    y_true = np.asarray(y_true).astype(int)
+    scores = np.asarray(scores, dtype=np.float64)
+    negatives = int((y_true == 0).sum())
+    if y_true.sum() == 0 or negatives == 0:
+        return None
+    allowed = budget_per_10k * negatives / 10000
+    order = np.argsort(-scores, kind='stable')
+    y_sorted = y_true[order]
+    tp = np.cumsum(y_sorted)
+    fp = np.cumsum(1 - y_sorted)
+    feasible = fp <= allowed
+    if not feasible.any():
+        return None
+    best = int(np.max(tp[feasible]))
+    index = int(np.min(np.nonzero(tp == best)[0]))  # highest cutoff reaching that recall
+    return float(scores[order][index])
+
+
 def choose_type_thresholds(rows: pd.DataFrame, scores: np.ndarray, global_threshold: float,
                            budget_per_10k: float = 100.0) -> dict:
     """Per-type cutoffs that each keep their own false-alert rate inside the budget.
@@ -130,27 +150,14 @@ def choose_type_thresholds(rows: pd.DataFrame, scores: np.ndarray, global_thresh
     their budget is too small to estimate.
     """
     types = rows['type'].astype(str)
+    scores = np.asarray(scores, dtype=np.float64)
     thresholds = {}
     for transaction_type in types.unique():
         mask = types.eq(transaction_type).to_numpy()
         y = rows.loc[mask, 'isFraud'].astype(int).to_numpy()
-        type_scores = np.asarray(scores)[mask]
-        negatives = int((y == 0).sum())
-        if y.sum() == 0 or negatives < 1000:
-            thresholds[transaction_type] = float(global_threshold)
-            continue
-        allowed = budget_per_10k * negatives / 10000
-        order = np.argsort(-type_scores, kind='stable')
-        y_sorted = y[order]
-        tp = np.cumsum(y_sorted)
-        fp = np.cumsum(1 - y_sorted)
-        feasible = fp <= allowed
-        if not feasible.any():
-            thresholds[transaction_type] = float(global_threshold)
-            continue
-        best = int(np.max(tp[feasible]))
-        index = int(np.min(np.nonzero(tp == best)[0]))  # highest cutoff reaching that recall
-        thresholds[transaction_type] = float(np.asarray(type_scores)[order][index])
+        type_scores = scores[mask]
+        cutoff = cutoff_for_budget(y, type_scores, budget_per_10k) if int((y == 0).sum()) >= 1000 else None
+        thresholds[transaction_type] = float(global_threshold) if cutoff is None else cutoff
     return thresholds
 
 
@@ -170,27 +177,35 @@ def _metrics_with_cutoffs(rows: pd.DataFrame, scores: np.ndarray, cutoffs: np.nd
 
 def compare_threshold_policies(valid_rows: pd.DataFrame, valid_scores: np.ndarray,
                                budget_per_10k: float = 100.0) -> dict:
-    """Fit both policies on the first half of validation, score the second half.
+    """Fit three policies on the first half of validation, score the second half.
 
-    The global policy is the existing max-F1 cutoff. The per-type policy keeps
-    each transaction type inside the same false-alert budget. Fitting and
-    measuring happen on disjoint rows, so the comparison is not in-sample.
+    ``global_f1`` is the existing max-F1 cutoff, ``global_budget`` is a single
+    cutoff chosen to fit the false-alert budget, and ``per_type`` keeps each
+    transaction type inside that same budget. Fitting and measuring happen on
+    disjoint rows, so no number here is in-sample.
     """
     n = len(valid_rows)
     half = n // 2
     fit_rows, fit_scores = valid_rows.iloc[:half], np.asarray(valid_scores)[:half]
     hold_rows, hold_scores = valid_rows.iloc[half:], np.asarray(valid_scores)[half:]
     global_threshold = choose_threshold(fit_rows['isFraud'].astype(int), fit_scores)
-    per_type = choose_type_thresholds(fit_rows, fit_scores, global_threshold, budget_per_10k)
+    budget_threshold = cutoff_for_budget(fit_rows['isFraud'].astype(int), fit_scores, budget_per_10k)
+    if budget_threshold is None:
+        budget_threshold = global_threshold
+    per_type = choose_type_thresholds(fit_rows, fit_scores, budget_threshold, budget_per_10k)
     holdout_cutoffs_global = np.full(len(hold_rows), global_threshold)
-    holdout_cutoffs_type = np.array([per_type.get(t, global_threshold)
+    holdout_cutoffs_budget = np.full(len(hold_rows), budget_threshold)
+    holdout_cutoffs_type = np.array([per_type.get(t, budget_threshold)
                                      for t in hold_rows['type'].astype(str)])
     return {
         'protocol': 'thresholds fit on the first half of validation, measured on the second half',
         'fit_rows': int(half), 'holdout_rows': int(n - half),
+        'budget_false_alerts_per_10000': budget_per_10k,
         'global_threshold': round(float(global_threshold), 6),
+        'global_budget_threshold': round(float(budget_threshold), 6),
         'per_type_thresholds': {k: round(float(v), 6) for k, v in per_type.items()},
-        'holdout_global': _metrics_with_cutoffs(hold_rows, hold_scores, holdout_cutoffs_global),
+        'holdout_global_f1': _metrics_with_cutoffs(hold_rows, hold_scores, holdout_cutoffs_global),
+        'holdout_global_budget': _metrics_with_cutoffs(hold_rows, hold_scores, holdout_cutoffs_budget),
         'holdout_per_type': _metrics_with_cutoffs(hold_rows, hold_scores, holdout_cutoffs_type),
     }
 
