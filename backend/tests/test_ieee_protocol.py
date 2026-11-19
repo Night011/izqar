@@ -90,3 +90,24 @@ def test_rank_average_is_scale_free_and_order_preserving():
     assert np.allclose(rank_average([a, b]), rank_average([a, a]))
     combined = rank_average([np.array([1, 2, 3, 4]), np.array([4, 3, 2, 1])])
     assert np.allclose(combined, np.full(4, 0.5))  # opposite ranks cancel out
+
+def test_ieee_blend_rank_average_and_budget_recall():
+    import tempfile
+    from ieee_blend_scores import blend_report, recall_at_budget
+
+    y = np.array([1, 0, 1, 0, 0, 0, 0, 0, 0, 0])
+    scores = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0])
+    recall, fp = recall_at_budget(y, scores, 1250.0)   # 1 of 8 negatives allowed
+    assert recall == 1.0 and fp <= 1250.0
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ('a', 'b'):
+            directory = Path(tmp) / name
+            directory.mkdir()
+            for fold in (0, 1):
+                np.save(directory / f'fold{fold}_scores.npy', scores)
+                np.save(directory / f'fold{fold}_labels.npy', y)
+        single = blend_report([Path(tmp) / 'a'])
+        duplicate = blend_report([Path(tmp) / 'a', Path(tmp) / 'b'])
+        assert single['mean_metrics']['pr_auc'] == pytest.approx(0.8333, abs=1e-3)
+        # rank-averaging two identical scorers must reproduce the single arm exactly
+        assert duplicate['mean_metrics'] == single['mean_metrics']

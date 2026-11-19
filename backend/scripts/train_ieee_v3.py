@@ -239,6 +239,12 @@ def run_research(data: pd.DataFrame, args, t0: float, excluded_tail_rows: int):
         y_valid = valid_rows['isFraud'].astype(int).to_numpy()
         scores = member_scores[0] if args.members == 1 else rank_average(member_scores)
         threshold = choose_threshold(y_valid, scores)
+        fold_index = len(fold_reports)
+        if args.save_scores:
+            scores_dir = Path(args.save_scores)
+            scores_dir.mkdir(parents=True, exist_ok=True)
+            np.save(scores_dir / f'fold{fold_index}_scores.npy', np.asarray(scores))
+            np.save(scores_dir / f'fold{fold_index}_labels.npy', y_valid)
         fold_reports.append({'train_frac': train_frac, 'valid_frac': valid_frac,
                              'train_rows': len(train_rows), 'valid_rows': len(valid_rows),
                              'members': args.members,
@@ -325,6 +331,8 @@ def main():
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--members', type=int, default=1,
                         help='fit N seeds per fold and rank-average their scores')
+    parser.add_argument('--save-scores', type=Path, default=None,
+                        help='write per-fold validation scores and labels for later blending')
     args = parser.parse_args()
     if args.mode == 'final' and args.members != 1:
         raise SystemExit('--members is a research-mode lever; the final artifact stays a single model')
