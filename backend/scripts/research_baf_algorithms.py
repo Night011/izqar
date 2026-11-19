@@ -43,12 +43,14 @@ from sklearn.preprocessing import OneHotEncoder
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from baf_protocol import (budget_alert_rate, calibrated_folds, evaluate_external,  # noqa: E402
                           evaluate_external_at_capacity, mean_external_metrics,
-                          rows_fingerprint, select_operating_point)
+                          quantile_cutoff, rows_fingerprint, select_operating_point)
 from train_baf import (CATEGORICAL, FEATURE_SETS, VELOCITY, add_engineered, read_base,  # noqa: E402
                        split_months)
 from train_ieee import file_provenance  # noqa: E402
 
 ROUND_GRID_STEP = 25
+# Set from --recency-half-life; None weights every training month equally.
+RECENCY_HALF_LIFE = None
 
 LIGHTGBM_PARAMS = {
     # Unweighted model; rounds chosen on calibration PR-AUC.
@@ -176,7 +178,11 @@ def _lightgbm_native_member(algo, fit_rows, feature_cols, numeric_cols, *, seed,
 
     model = LGBMClassifier(**params, random_state=seed, n_jobs=min(4, os.cpu_count() or 1),
                            verbose=-1)
-    model.fit(transform(fit_rows), y, categorical_feature=CATEGORICAL)
+    weights = None
+    if RECENCY_HALF_LIFE:
+        age = float(fit_rows.month.max()) - fit_rows.month.astype('float32')
+        weights = (0.5 ** (age / RECENCY_HALF_LIFE)).to_numpy()
+    model.fit(transform(fit_rows), y, categorical_feature=CATEGORICAL, sample_weight=weights)
     return {'name': algo, 'max_rounds': max_rounds, 'params': params, 'transform': transform,
             'predict': lambda matrix, rounds: model.predict_proba(matrix, num_iteration=rounds)[:, 1]}
 
@@ -222,12 +228,19 @@ def _combine(score_list, combination):
     raise ValueError(f'unknown combination {combination}')
 
 
-def _select_rounds(y_calibration, matrix, predict, max_rounds: int):
-    """Pick the round count maximising calibration PR-AUC; no external labels involved."""
+def _select_rounds(y_calibration, matrix, predict, max_rounds: int, budget=None):
+    """Pick the round count on calibration labels: PR-AUC, or recall at the FP budget."""
     grid = list(range(ROUND_GRID_STEP, max_rounds + 1, ROUND_GRID_STEP))
     sweep, best_rounds, best_score = [], grid[0], -1.0
     for rounds in grid:
-        score = float(average_precision_score(y_calibration, predict(matrix, rounds)))
+        scores = predict(matrix, rounds)
+        if budget is None:
+            score = float(average_precision_score(y_calibration, scores))
+        else:
+            from train_ieee import metrics
+            rate = budget_alert_rate(y_calibration, scores, budget)
+            score = float(metrics(y_calibration, scores,
+                                  quantile_cutoff(scores, rate))['recall'])
         sweep.append({'rounds': rounds, 'calibration_pr_auc': round(score, 6)})
         if score > best_score:
             best_rounds, best_score = rounds, score
@@ -236,7 +249,7 @@ def _select_rounds(y_calibration, matrix, predict, max_rounds: int):
 
 def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
                   numeric_cols, *, seed, device, max_rounds, budget, refit=False,
-                  extra_params=None, return_scores=False) -> dict:
+                  extra_params=None, return_scores=False, select_metric='ap') -> dict:
     started = time.perf_counter()
     members, combination = build_members(algo, fit_rows, feature_cols, numeric_cols,
                                          seed=seed, device=device, max_rounds=max_rounds,
@@ -251,7 +264,8 @@ def evaluate_fold(algo, fit_rows, calibration_rows, external_rows, feature_cols,
         x_calibration = member['transform'](calibration_rows)
         x_external = member['transform'](external_rows)
         chosen, best_score, sweep = _select_rounds(y_calibration, x_calibration,
-                                                  member['predict'], member['max_rounds'])
+                                                  member['predict'], member['max_rounds'],
+                                                  budget if select_metric == 'budget' else None)
         rounds[member['name']] = chosen
         calibration[member['name']] = {'selected_rounds': chosen,
                                        'calibration_pr_auc': best_score,
@@ -322,8 +336,15 @@ def main():
                         help='save out-of-fold external scores as .npy for later ensembling')
     parser.add_argument('--scores-tag', default='',
                         help='suffix for saved score files, e.g. a seed repeat')
+    parser.add_argument('--select-metric', default='ap', choices=['ap', 'budget'],
+                        help="rounds chosen by calibration PR-AUC ('ap') or recall at the FP budget")
+    parser.add_argument('--recency-half-life', type=float,
+                        help='LightGBM sample weights halve every N months of training age')
     parser.add_argument('--max-false-alerts-per-10000', type=float, default=100.0)
     args = parser.parse_args()
+
+    global RECENCY_HALF_LIFE
+    RECENCY_HALF_LIFE = args.recency_half_life
 
     tuned = json.loads(args.params_json.read_text(encoding='utf-8')) if args.params_json else {}
     extra = VELOCITY if ('v1v' in args.feature_sets or 'v1x' in args.feature_sets) else ()
@@ -349,6 +370,7 @@ def main():
                     algo, fit_rows, calibration_rows, external_rows, feature_cols,
                     numeric_cols, seed=args.seed, device=args.device, max_rounds=args.max_rounds,
                     budget=args.max_false_alerts_per_10000, refit=args.refit_on_calibration,
+                    select_metric=args.select_metric,
                     extra_params=(tuned.get('best_params') if 'best_params' in tuned
                                   else tuned.get(algo)),
                     return_scores=bool(args.scores_dir))
