@@ -1,0 +1,14 @@
+{
+  "id": "hoogle57/izqar-ieee-v5-seed-ensemble-gpu-cv-v1",
+  "title": "IZQAR IEEE v5 Seed Ensemble GPU CV v1",
+  "code_file": "izqar-ieee-v5-seed-ensemble-gpu-cv-v1.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "competition_sources": ["ieee-fraud-detection"],
+  "dataset_sources": [],
+  "kernel_sources": []
+}

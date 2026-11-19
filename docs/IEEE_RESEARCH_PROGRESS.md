@@ -43,3 +43,25 @@ Data read-only from `C:\Users\a\Documents\IZQAR-MVP\backend\data\ieee` (train_tr
 - CI root cause: check-run annotation on ALL runs (every branch incl. main): "The job was not started because your account is locked due to a billing issue." CI does not execute at all; local pytest is the verification path.
 - IBM branch merged into feat/ieee-cis-research (cc48db2): conftest now byte-identical to IBM's (SQLite teardown fixture, pytest exits 0), .gitignore/main.py/ml.py unions contain both agents' changes (ieee-candidate endpoint + investigations/model-registry). 140 tests passed pre-freq-machinery, 144 after.
 - 2026-11-18: PR #1 MERGED into main (merge commit b6c8c5b). Working tree == origin/main (empty diff). 144 tests passed on merged state. CI cannot run: billing lock (see GitHub Actions annotation). No deployment procedure exists in repo (no deploy workflow/scripts/infra config) — deployment not performed; local demo path documented in README unchanged. Rollback: main previous state 0d2e9ea; experiment models remain local (gitignored), previous production model paths untouched.
+
+## v5-v7: diversity levers on identical folds (2026-11-19)
+
+Research mode, same three expanding folds, final 15% tail physically excluded.
+
+| run | arm | mean PR-AUC | recall@100 FP/10k | verdict |
+|---|---|---|---|---|
+| v5 | `none` + seeds 42/43/44, rank-average | 0.5757 | — | seed ensemble: +0.0003, nothing |
+| v6 | `none` alone | 0.5765 | — | reference |
+| v6 | `causal` alone | 0.5569 | — | weaker by 0.0196 |
+| v7 | `none` + `causal`, rank-average | 0.5720 | 0.474 | heterogeneous blend: **worse** by 0.0045 |
+
+v6 could not answer the question at first: `--scores-dir` was repeated instead of
+carrying both values, so it blended one arm and reported that arm's metrics. Fixed
+in `ieee_blend_scores.py` (`nargs='+'`); v7 is the corrected run.
+
+Conclusion: IEEE-CIS sits on the same plateau as BAF. Diversity does not pay
+because the `causal` arm's errors are a subset of `none`'s, not complementary.
+The remaining real gap is promotional, not modelling: the production artifact
+measures test PR-AUC 0.4442 while the v3-fixed configuration measures 0.5074 on
+the same historical test and 0.5765 in research CV, and it was never exported as
+a candidate.

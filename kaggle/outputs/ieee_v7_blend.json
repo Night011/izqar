@@ -1,0 +1,31 @@
+{
+ "arms": [
+  "/kaggle/working/scores_none",
+  "/kaggle/working/scores_causal"
+ ],
+ "fp_per_10k": 100.0,
+ "folds": [
+  {
+   "fold": 0,
+   "pr_auc": 0.590636,
+   "recall_at_budget": 0.493111,
+   "false_alerts_per_10000": 99.93
+  },
+  {
+   "fold": 1,
+   "pr_auc": 0.570745,
+   "recall_at_budget": 0.472214,
+   "false_alerts_per_10000": 100.0
+  },
+  {
+   "fold": 2,
+   "pr_auc": 0.55469,
+   "recall_at_budget": 0.455834,
+   "false_alerts_per_10000": 99.99
+  }
+ ],
+ "mean_metrics": {
+  "pr_auc": 0.572024,
+  "recall_at_budget": 0.47372
+ }
+}
