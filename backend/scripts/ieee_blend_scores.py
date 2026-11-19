@@ -73,7 +73,8 @@ def blend_report(directories, fp_per_10k=100.0, folds=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scores-dir', type=Path, nargs='+', required=True)
+    parser.add_argument('--scores-dir', type=Path, nargs='+', required=True,
+                        help='one or more directories written by --save-scores; they are rank-averaged')
     parser.add_argument('--fp-per-10k', type=float, default=100.0)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
