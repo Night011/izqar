@@ -235,6 +235,19 @@ Negative results, all measured: class weighting helps LightGBM alone (+0.0017 ov
 
 The 400-round cap bound only CatBoost, and lifting it does not help; the served operating point is not round-limited either (budget-based selection is identical within noise); recency weighting hurts, which is consistent with the Stage 10 finding that month drift is not the limiting factor. Every training-side lever measured so far lands inside ±0.002 of the plateau, while the seven velocity columns were worth +0.018.
 
+### Stage 12d — heterogeneous boosting variants
+
+| member | PR-AUC m3/m4/m5 | mean | note |
+|---|---|---|---|
+| LightGBM `dart` | — | 0.1658 | weakest alone (−0.0052), no blend gain |
+| CatBoost `Lossguide` (max_leaves 31) | 0.1714/0.1728/0.1698 | 0.1714 | weaker alone, but adds diversity |
+| **6-arm blend (5 arms + Lossguide)** | **0.1589/0.1797/0.1936** | **0.1774** | new best, FP/10k 98/95/95 |
+| 6-arm blend with `dart` instead | — | 0.1758 | no gain |
+| 7-arm blend (both) | — | 0.1764 | duplicates dilute |
+
+Diversity pays only with a different *tree-growth policy* (Lossguide: +0.0005), not a different *boosting scheme* (dart: −0.0016).
+
+
 
 
 Trade-off at the same folds (post-hoc, threshold-free view; working budget stays 100):
@@ -270,6 +283,7 @@ Adoption rule for any step: offline replay of a historical application stream, t
 
 ## Log
 
+- 2026-11-19d: boosting-variant members. CatBoost Lossguide joins the blend as a sixth member and sets a new best: mean PR-AUC 0.1774, recall@capacity .262/.256/.279, FP/10k 98/95/95 (+0.0042 vs 0.1732). LightGBM dart is weaker alone (0.1658) and does not help. Recorded the tuned and variant parameter sets under docs/baf_params_*.json.
 - 2026-11-19c: training-side levers tested and all flat: round cap 400→1000 (CatBoost −0.0003, others unaffected), rounds selected by recall@budget instead of PR-AUC (−0.0002), recency weights (−0.0018), and their blend members (±0.0005). Best stays the 5-arm rank ensemble at 0.1769 mean PR-AUC.
 - 2026-11-19b: extra ensemble members tested. Best measured: 5-arm rank ensemble (xgboost, lightgbm native, class-weighted lightgbm native, catboost native, catboost one-hot) at mean PR-AUC 0.1769, recall@100 FP/10k 0.264, FP/10k 97/93/96 (+0.0037 vs 0.1732). Seed repeats, fitted blend weights and a sixth member are all flat or worse.
 - 2026-11-19: official Feedzai benchmark reproduced on months 6–7 (PR-AUC 0.1968, recall@5%FPR 0.553); the admissible contract costs −0.0076 PR-AUC. 30+8 Optuna trials on month 2 do not transfer to the folds. Native vs one-hot categoricals, raw NaN vs imputation, balcon/device_email sentinels, and velocity ratio interactions are all inside noise. Best measured: catboost native v1v 0.1739, 3-model rank ensemble 0.1759 (+0.0027 vs 0.1732), recall@100 0.271.

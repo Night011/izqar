@@ -1,0 +1,17 @@
+{
+  "lightgbm_native": {
+    "num_leaves": 13, "max_depth": 4, "learning_rate": 0.06516378350678734,
+    "min_child_samples": 163, "reg_lambda": 1.3685608616346072,
+    "reg_alpha": 2.1834893190537192, "colsample_bytree": 0.4939279045708339,
+    "subsample": 0.8668159712138367, "subsample_freq": 1, "n_estimators": 600,
+    "boosting_type": "dart", "drop_rate": 0.1, "skip_drop": 0.5
+  },
+  "xgboost": {
+    "n_estimators": 600, "max_depth": 4, "learning_rate": 0.06, "booster": "dart",
+    "rate_drop": 0.1, "skip_drop": 0.5, "subsample": 0.85, "colsample_bytree": 0.85
+  },
+  "catboost_native": {
+    "depth": 6, "learning_rate": 0.05, "l2_leaf_reg": 5.0,
+    "grow_policy": "Lossguide", "max_leaves": 31
+  }
+}
