@@ -121,6 +121,80 @@ def choose_threshold(y_true, scores):
     return float(thresholds[int(np.argmax(f1))])
 
 
+def choose_type_thresholds(rows: pd.DataFrame, scores: np.ndarray, global_threshold: float,
+                           budget_per_10k: float = 100.0) -> dict:
+    """Per-type cutoffs that each keep their own false-alert rate inside the budget.
+
+    ``type`` is a serving feature, so a per-type operating point is deployable.
+    Types with fewer than 1000 negatives or no positives keep the global cutoff:
+    their budget is too small to estimate.
+    """
+    types = rows['type'].astype(str)
+    thresholds = {}
+    for transaction_type in types.unique():
+        mask = types.eq(transaction_type).to_numpy()
+        y = rows.loc[mask, 'isFraud'].astype(int).to_numpy()
+        type_scores = np.asarray(scores)[mask]
+        negatives = int((y == 0).sum())
+        if y.sum() == 0 or negatives < 1000:
+            thresholds[transaction_type] = float(global_threshold)
+            continue
+        allowed = budget_per_10k * negatives / 10000
+        order = np.argsort(-type_scores, kind='stable')
+        y_sorted = y[order]
+        tp = np.cumsum(y_sorted)
+        fp = np.cumsum(1 - y_sorted)
+        feasible = fp <= allowed
+        if not feasible.any():
+            thresholds[transaction_type] = float(global_threshold)
+            continue
+        best = int(np.max(tp[feasible]))
+        index = int(np.min(np.nonzero(tp == best)[0]))  # highest cutoff reaching that recall
+        thresholds[transaction_type] = float(np.asarray(type_scores)[order][index])
+    return thresholds
+
+
+def _metrics_with_cutoffs(rows: pd.DataFrame, scores: np.ndarray, cutoffs: np.ndarray) -> dict:
+    y_true = rows['isFraud'].astype(int).to_numpy()
+    pred = (np.asarray(scores) >= cutoffs).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
+    return {
+        'average_precision_pr_auc': round(float(average_precision_score(y_true, scores)), 6),
+        'precision': round(float(precision_score(y_true, pred, zero_division=0)), 6),
+        'recall': round(float(recall_score(y_true, pred, zero_division=0)), 6),
+        'f1': round(float(f1_score(y_true, pred, zero_division=0)), 6),
+        'confusion_matrix_tn_fp_fn_tp': [int(tn), int(fp), int(fn), int(tp)],
+        'false_alerts_per_10000': round(float(fp * 10000 / max(tn + fp, 1)), 3),
+    }
+
+
+def compare_threshold_policies(valid_rows: pd.DataFrame, valid_scores: np.ndarray,
+                               budget_per_10k: float = 100.0) -> dict:
+    """Fit both policies on the first half of validation, score the second half.
+
+    The global policy is the existing max-F1 cutoff. The per-type policy keeps
+    each transaction type inside the same false-alert budget. Fitting and
+    measuring happen on disjoint rows, so the comparison is not in-sample.
+    """
+    n = len(valid_rows)
+    half = n // 2
+    fit_rows, fit_scores = valid_rows.iloc[:half], np.asarray(valid_scores)[:half]
+    hold_rows, hold_scores = valid_rows.iloc[half:], np.asarray(valid_scores)[half:]
+    global_threshold = choose_threshold(fit_rows['isFraud'].astype(int), fit_scores)
+    per_type = choose_type_thresholds(fit_rows, fit_scores, global_threshold, budget_per_10k)
+    holdout_cutoffs_global = np.full(len(hold_rows), global_threshold)
+    holdout_cutoffs_type = np.array([per_type.get(t, global_threshold)
+                                     for t in hold_rows['type'].astype(str)])
+    return {
+        'protocol': 'thresholds fit on the first half of validation, measured on the second half',
+        'fit_rows': int(half), 'holdout_rows': int(n - half),
+        'global_threshold': round(float(global_threshold), 6),
+        'per_type_thresholds': {k: round(float(v), 6) for k, v in per_type.items()},
+        'holdout_global': _metrics_with_cutoffs(hold_rows, hold_scores, holdout_cutoffs_global),
+        'holdout_per_type': _metrics_with_cutoffs(hold_rows, hold_scores, holdout_cutoffs_type),
+    }
+
+
 def type_slice_metrics(rows: pd.DataFrame, scores: np.ndarray, threshold: float) -> dict:
     """Validation-only quality slices for transfer types that can contain fraud.
 
@@ -281,6 +355,7 @@ def train(data_path: Path, output: Path, n_estimators: int, max_rows: int | None
         'experiment': finish_experiment(experiment, started),
         'features': features, 'numerical_features': numeric, 'categorical_features': categorical, 'pipeline': pipeline,
         'threshold': threshold, 'validation_metrics': evaluate(valid_rows['isFraud'].astype(int), valid_scores, threshold),
+        'validation_threshold_policies': compare_threshold_policies(valid_rows, valid_scores),
         'validation_type_slices': type_slice_metrics(valid_rows, valid_scores, threshold),
         'validation_robustness': robustness_diagnostics(pipeline, valid_rows, valid_scores, threshold, feature_set),
         'validation_calibration': calibration_diagnostics(valid_rows['isFraud'].astype(int), valid_scores),
