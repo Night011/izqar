@@ -209,6 +209,16 @@ def build_features(data: pd.DataFrame, freq_mode: str) -> pd.DataFrame:
     return data
 
 
+def rank_average(score_list):
+    """Average within-batch ranks: scale-free, so members need no calibration."""
+    ranked = []
+    for scores in score_list:
+        scores = np.asarray(scores, dtype=np.float64)
+        order = np.argsort(np.argsort(scores, kind='stable'), kind='stable')
+        ranked.append(order / max(len(order) - 1, 1))
+    return np.mean(ranked, axis=0)
+
+
 def run_research(data: pd.DataFrame, args, t0: float, excluded_tail_rows: int):
     n = len(data)
     fold_reports = []
@@ -219,14 +229,20 @@ def run_research(data: pd.DataFrame, args, t0: float, excluded_tail_rows: int):
         for label, part in [('train', train_rows), ('validation', valid_rows)]:
             if part['isFraud'].nunique() != 2:
                 raise ValueError(f'fold {train_frac}-{valid_frac}: {label} split must contain both classes.')
-        pipeline, features, nums, cats, best_iteration = fit_on(train_rows, valid_rows,
-                                                                args.estimators, args.seed, args.device)
+        pipelines, features, nums, cats, best_iteration, member_scores = [], None, None, None, None, []
+        for offset in range(args.members):
+            pipeline, features, nums, cats, best_iteration = fit_on(
+                train_rows, valid_rows, args.estimators, args.seed + offset, args.device)
+            member_scores.append(pipeline.predict_proba(valid_rows[features])[:, 1])
+            pipelines.append(pipeline)
         report_features = features
         y_valid = valid_rows['isFraud'].astype(int).to_numpy()
-        scores = pipeline.predict_proba(valid_rows[features])[:, 1]
+        scores = member_scores[0] if args.members == 1 else rank_average(member_scores)
         threshold = choose_threshold(y_valid, scores)
         fold_reports.append({'train_frac': train_frac, 'valid_frac': valid_frac,
                              'train_rows': len(train_rows), 'valid_rows': len(valid_rows),
+                             'members': args.members,
+                             'member_seeds': [args.seed + i for i in range(args.members)],
                              'best_iteration': int(best_iteration) if best_iteration is not None else None,
                              'threshold': round(threshold, 6),
                              'metrics': metrics(y_valid, scores, threshold)})
@@ -307,7 +323,11 @@ def main():
     parser.add_argument('--mode', choices=['research', 'final'], default='research')
     parser.add_argument('--freq', choices=['causal', 'causal_log', 'none'], default='causal')
     parser.add_argument('--device', default='cpu')
+    parser.add_argument('--members', type=int, default=1,
+                        help='fit N seeds per fold and rank-average their scores')
     args = parser.parse_args()
+    if args.mode == 'final' and args.members != 1:
+        raise SystemExit('--members is a research-mode lever; the final artifact stays a single model')
     t0 = time.time()
     data = load_sorted(args.data_dir, args.max_rows)
     excluded_tail_rows = 0

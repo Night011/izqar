@@ -82,3 +82,11 @@ def test_existing_report_is_not_overwritten(tmp_path):
     with pytest.raises(FileExistsError, match='Output already exists'):
         train(tmp_path, output, n_estimators=10)
     assert report.read_text(encoding='utf-8') == 'keep this result'
+
+def test_rank_average_is_scale_free_and_order_preserving():
+    from train_ieee_v3 import rank_average
+    a = np.array([0.9, 0.1, 0.5, 0.2])
+    b = a * 1000.0  # same ranking, different scale
+    assert np.allclose(rank_average([a, b]), rank_average([a, a]))
+    combined = rank_average([np.array([1, 2, 3, 4]), np.array([4, 3, 2, 1])])
+    assert np.allclose(combined, np.full(4, 0.5))  # opposite ranks cancel out
