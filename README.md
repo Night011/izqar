@@ -6,6 +6,8 @@
 ![Local inference](https://img.shields.io/badge/inference-local%20CPU-2f7d8a)
 ![Models](https://img.shields.io/badge/models-4%20specialized%20%2B%201%20experimental-455a9c)
 
+![IZQAR: центр мониторинга на демо-данных](docs/screenshots/01-dashboard.png)
+
 **Ключевая идея:** подозрительная операция — повод для расследования, а не автоматическое обвинение. IZQAR помогает собрать сигналы, показать связи и сохранить решение аналитика с понятным происхождением каждой оценки.
 
 ## Содержание
@@ -23,10 +25,12 @@
 
 ## Материалы для жюри
 
-- [Презентация на 8 слайдов](docs/PRESENTATION.md) — проблема, архитектура, ML, результаты, демо, ограничения.
-- [Сценарий показа на 5 минут](docs/JURY_DEMO.md).
+- [Презентация: PPTX для Google Slides](docs/presentation/IZQAR-hackathon.pptx) · [PDF](docs/presentation/IZQAR-hackathon.pdf) — 8 слайдов, тёмная тема, реальные скриншоты.
+- [Сценарий показа на 5 минут](docs/JURY_DEMO.md) и [сценарий видео на 2–4 минуты](docs/DEMO_VIDEO_SCRIPT.md).
 - [Чек-лист подачи и проверок](docs/HACKATHON_SUBMISSION.md) — что именно проверено на живом стенде.
 - [PaySim: пороги при одинаковом FP-бюджете](docs/PAYSIM_THRESHOLD_POLICIES.md).
+
+> Google Slides: `Файл → Импорт слайдов → Загрузить` и выбрать `IZQAR-hackathon.pptx`.
 
 ## Проблема и решение
 

@@ -1,7 +1,7 @@
 .registry-scroll{max-width:100%;overflow-x:auto}
 .registry-table{width:100%;border-collapse:collapse;min-width:720px;font-size:11px;color:#c8dce2}
 .registry-table th,.registry-table td{padding:10px 12px;text-align:left;vertical-align:top;border-bottom:1px solid #294751}
-.registry-table th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8daeb9}
+.registry-table th{font-size:11px;text-transform:none;letter-spacing:0;color:#8fa9bb;font-weight:500}
 .registry-table td strong,.registry-table td small{display:block}
 .registry-table td small{margin-top:4px;color:#8daeb9}
 .registry-table details{max-width:280px}

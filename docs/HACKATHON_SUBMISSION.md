@@ -9,7 +9,10 @@
 | Материал | Путь | Статус |
 |---|---|---|
 | README проекта | [README.md](../README.md) | готов, проверены все цифры |
-| Презентация (8 слайдов + речь) | [PRESENTATION.md](PRESENTATION.md) | готово |
+| Презентация PPTX (Google Slides) | [docs/presentation/IZQAR-hackathon.pptx](presentation/IZQAR-hackathon.pptx) | 8 слайдов, проверена рендером |
+| Презентация PDF | [docs/presentation/IZQAR-hackathon.pdf](presentation/IZQAR-hackathon.pdf) | 8 страниц, сверена с PPTX |
+| Текст слайдов и речь | [PRESENTATION.md](PRESENTATION.md) | готово |
+| Сценарий видео 2–4 минуты | [DEMO_VIDEO_SCRIPT.md](DEMO_VIDEO_SCRIPT.md) | готово |
 | Сценарий показа на 5 минут | [JURY_DEMO.md](JURY_DEMO.md) | проверен на живом стенде |
 | Скриншоты приложения | [screenshots/](screenshots/) (5 PNG) | сняты с работающего приложения |
 | Архитектура | [ARCHITECTURE.md](ARCHITECTURE.md) | актуальна |
@@ -40,7 +43,7 @@ ML-артефакты в Git не входят. Их нужно положить
 
 ## 3. Что проверено на живом стенде (20.11.2026)
 
-- **Backend:** `158 passed` (pytest, из `backend/`).
+- **Backend:** `162 passed` (pytest, из `backend/`; четыре теста добавлены вместе с PaySim threshold policies).
 - **Frontend:** `npm run build` успешен; Vite dev-сервер отдаёт приложение на `:5173`.
 - **Демо-сценарии (API):** `normal` 1 операция, `new_recipient` 1 (high), `velocity` 4,
   `fan_in` 6, `chain` 4, `cycle` 3 — все срабатывания объяснены Rule Engine.

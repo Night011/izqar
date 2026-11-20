@@ -90,7 +90,7 @@ function App() {
   if (!connected) return <div className="login-page">
     <div className="login-glow" /><div className="login-card">
       <Brand large />
-      <div className="eyebrow">ANALYST ACCESS / LOCAL DEMO</div>
+      <div className="eyebrow">Analyst access · local demo</div>
       <h1>Интеллектуальная защита финансовых операций</h1>
       <p>Демо-консоль IZQAR. Для доступа введите API-ключ из файла <code>.env</code>.</p>
       <label htmlFor="secret">Ключ доступа</label>
@@ -104,7 +104,7 @@ function App() {
   return <div className="app-shell">
     <aside className="sidebar">
       <Brand />
-      <div className="side-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <div className="side-label">Рабочее пространство</div>
       <nav>
         <button className={'nav-item ' + (tab === 'overview' ? 'active' : '')} onClick={() => setTab('overview')}><BarChart3 size={18} /> Обзор системы <ChevronRight size={15} /></button>
         <button className={'nav-item ' + (tab === 'investigations' ? 'active' : '')} onClick={() => { setInvestigationFocus(null); setTab('investigations'); }}><ShieldAlert size={18} /> Расследования <ChevronRight size={15} /></button>
@@ -112,7 +112,7 @@ function App() {
         <button className={'nav-item ' + (tab === 'ml' ? 'active' : '')} onClick={() => setTab('ml')}><Cpu size={18} /> ML Analytics <ChevronRight size={15} /></button>
       </nav>
       <div className="side-divider" />
-      <div className="side-label">СТАТУС СИСТЕМЫ</div>
+      <div className="side-label">Статус системы</div>
       <div className="system-row"><span className="status-dot" /> API-сервис <span>Активен</span></div>
       <div className="system-row"><span className="status-dot" /> Rule Engine <span>Активен</span></div>
       <div className="system-row"><span className={'status-dot ' + (model?.ieee_cis ? '' : 'amber')} /> IEEE-CIS ML <span>{model?.ieee_cis ? 'Обучена' : 'Нет модели'}</span></div>
@@ -126,10 +126,10 @@ function App() {
     <div className="main-frame">
       <header className="topbar">
         <div className="breadcrumb">Платформа <ChevronRight size={14} /> <strong>{tab === 'overview' ? 'Обзор системы' : tab === 'investigations' ? 'Расследования' : tab === 'network' ? 'Граф связей' : 'ML Analytics'}</strong></div>
-        <div className="top-actions"><span className="demo-tag"><span className="status-dot" /> DEMO ENVIRONMENT</span><button title="Обновить" className="icon-button" onClick={() => refresh(key).catch((e: Error) => setError(e.message))}><RefreshCcw size={18} /></button><button title="Выйти" className="icon-button" onClick={logout}><LogOut size={18} /></button></div>
+        <div className="top-actions"><span className="demo-tag"><span className="status-dot" /> Demo environment</span><button title="Обновить" className="icon-button" onClick={() => refresh(key).catch((e: Error) => setError(e.message))}><RefreshCcw size={18} /></button><button title="Выйти" className="icon-button" onClick={logout}><LogOut size={18} /></button></div>
       </header>
       <main className="content">
-        <div className="page-heading"><div><div className="eyebrow">IZQAR / FRAUD INTELLIGENCE</div><h1>{tab === 'overview' ? 'Центр мониторинга' : tab === 'investigations' ? 'Рабочее место аналитика' : tab === 'network' ? 'Анализ связей' : 'Аналитика моделей'}</h1><p>{tab === 'overview' ? 'Оценка рисков и расследование подозрительных операций.' : tab === 'investigations' ? 'Очередь, связанные счета, решения и журнал действий.' : tab === 'network' ? 'Исследование структуры переводов между синтетическими счетами.' : 'Фактические тестовые метрики и отдельные ML-прогнозы.'}</p></div><span className="date-stamp"><Clock size={15} /> Демо-режим · KZT</span></div>
+        <div className="page-heading"><div><div className="eyebrow">IZQAR / Fraud Intelligence</div><h1>{tab === 'overview' ? 'Центр мониторинга' : tab === 'investigations' ? 'Рабочее место аналитика' : tab === 'network' ? 'Анализ связей' : 'Аналитика моделей'}</h1><p>{tab === 'overview' ? 'Оценка рисков и расследование подозрительных операций.' : tab === 'investigations' ? 'Очередь, связанные счета, решения и журнал действий.' : tab === 'network' ? 'Исследование структуры переводов между синтетическими счетами.' : 'Фактические тестовые метрики и отдельные ML-прогнозы.'}</p></div><span className="date-stamp"><Clock size={15} /> Демо-режим · KZT</span></div>
         <div className="disclaimer"><CircleHelp size={16} /> <span><strong>Исследовательский прототип.</strong> Все операции синтетические. Оценки в таблице рассчитаны правилами, не ML-моделью. Банк и реальные клиенты не подключены.</span></div>
         {error && <div className="error-banner"><AlertTriangle size={17}/>{error}<button onClick={() => setError('')} aria-label="Закрыть"><X size={15}/></button></div>}
 
