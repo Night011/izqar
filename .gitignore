@@ -20,3 +20,5 @@ frontend/*.tsbuildinfo
 # CatBoost training metadata
 catboost_info/
 kaggle/outputs_v7/
+docs/.opencode/
+docs/ARCHITECTURE.zip
