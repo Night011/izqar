@@ -1,0 +1,15 @@
+{
+  "id": "hoogle57/izqar-paysim-v7-policy-v1",
+  "title": "IZQAR PaySim v7 Policy v1",
+  "code_file": "izqar-paysim-v7-policy-v1.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "ealaxi/paysim1"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}
