@@ -1,0 +1,54 @@
+{
+  "protocol": "thresholds fit on the first half of validation, measured on the second half",
+  "fit_rows": 486586,
+  "holdout_rows": 486587,
+  "budget_false_alerts_per_10000": 100.0,
+  "global_threshold": 0.998321,
+  "global_budget_threshold": 0.988021,
+  "per_type_thresholds": {
+    "CASH_IN": 0.988021,
+    "PAYMENT": 0.988021,
+    "TRANSFER": 0.999085,
+    "CASH_OUT": 0.988021,
+    "DEBIT": 0.988021
+  },
+  "holdout_global_f1": {
+    "average_precision_pr_auc": 0.885922,
+    "precision": 0.898876,
+    "recall": 0.769231,
+    "f1": 0.829016,
+    "confusion_matrix_tn_fp_fn_tp": [
+      486248,
+      27,
+      72,
+      240
+    ],
+    "false_alerts_per_10000": 0.555
+  },
+  "holdout_global_budget": {
+    "average_precision_pr_auc": 0.885922,
+    "precision": 0.364486,
+    "recall": 1.0,
+    "f1": 0.534247,
+    "confusion_matrix_tn_fp_fn_tp": [
+      485731,
+      544,
+      0,
+      312
+    ],
+    "false_alerts_per_10000": 11.187
+  },
+  "holdout_per_type": {
+    "average_precision_pr_auc": 0.885922,
+    "precision": 0.367059,
+    "recall": 1.0,
+    "f1": 0.537005,
+    "confusion_matrix_tn_fp_fn_tp": [
+      485737,
+      538,
+      0,
+      312
+    ],
+    "false_alerts_per_10000": 11.064
+  }
+}
