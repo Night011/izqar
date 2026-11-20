@@ -10,14 +10,23 @@
 
 ## Содержание
 
+- [Материалы для жюри](#материалы-для-жюри)
 - [Проблема и решение](#проблема-и-решение)
 - [Что работает сейчас](#что-работает-сейчас)
 - [Модели и подтверждённые результаты](#модели-и-подтверждённые-результаты)
 - [Архитектура](#архитектура)
 - [Live Demonstration](#live-demonstration--how-izqar-works)
+- [Скриншоты интерфейса](#скриншоты-интерфейса)
 - [Быстрый запуск](#быстрый-запуск)
 - [API и данные](#api-и-данные)
 - [Ограничения и roadmap](#ограничения-и-roadmap)
+
+## Материалы для жюри
+
+- [Презентация на 8 слайдов](docs/PRESENTATION.md) — проблема, архитектура, ML, результаты, демо, ограничения.
+- [Сценарий показа на 5 минут](docs/JURY_DEMO.md).
+- [Чек-лист подачи и проверок](docs/HACKATHON_SUBMISSION.md) — что именно проверено на живом стенде.
+- [PaySim: пороги при одинаковом FP-бюджете](docs/PAYSIM_THRESHOLD_POLICIES.md).
 
 ## Проблема и решение
 
@@ -124,26 +133,40 @@ sequenceDiagram
 
 ## Скриншоты интерфейса
 
-README намеренно не содержит декоративных или сгенерированных «скриншотов». Для жюри допустимы только снимки работающего приложения без API-ключей, приватных путей и выдуманных данных. Точные инструкции для Dashboard, мониторинга, ML Analytics, Registry, Graph, Investigation и Unified: [docs/screenshots/README.md](docs/screenshots/README.md).
+Снимки сделаны с локального запуска на синтетических демо-данных (`scripts/seed_demo.py`), без API-ключей и реальных клиентов:
+
+| Экран | Файл |
+|---|---|
+| Центр мониторинга | [01-dashboard.png](docs/screenshots/01-dashboard.png) |
+| ML Analytics | [02-ml-analytics.png](docs/screenshots/02-ml-analytics.png) |
+| Граф связей | [03-graph.png](docs/screenshots/03-graph.png) |
+| Очередь расследований | [04-investigations.png](docs/screenshots/04-investigations.png) |
+| Карточка расследования (журнал + ML assessment) | [05-investigation-detail.png](docs/screenshots/05-investigation-detail.png) |
+
+Правила для новых снимков: только работающее приложение, без API-ключей, приватных путей и выдуманных данных. [docs/screenshots/README.md](docs/screenshots/README.md).
 
 ## Быстрый запуск
 
-> Текущая проверенная реализация находится в ветке `feat/ml-pipelines-and-startup`; `main` намеренно не изменялась. Для клона ветка должна быть опубликована в `origin` либо изменения должны быть приняты через PR.
+Проверенная реализация находится в `main`.
 
 ```powershell
 git clone https://github.com/Night011/izqar.git
 cd izqar
-git fetch origin
-git checkout feat/ml-pipelines-and-startup
 powershell -ExecutionPolicy Bypass -File .\scripts\start_local.ps1
 ```
 
-Скрипт создаёт/проверяет локальную конфигурацию и ключ. Не вставляйте ключ в скриншоты, коммиты или чат. После готовности API:
+Скрипт создаёт/проверяет локальную конфигурацию и ключ. Не вставляйте ключ в скриншоты, коммиты или чат. Скрипт поднимает API; React-панель запускается отдельно:
 
 ```powershell
 cd frontend
 npm install
 npm run dev
+```
+
+Демо-данные (шесть сценариев и одно расследование), когда API уже работает:
+
+```powershell
+python scripts\seed_demo.py
 ```
 
 - React Dashboard: `http://127.0.0.1:5173`
@@ -161,7 +184,7 @@ cd ..\frontend
 npm run build
 ```
 
-Последняя локальная проверка: **80 backend tests passed**; React production build и живой Uvicorn smoke PaySim v5 прошли. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
+Последняя локальная проверка (20 ноября 2026): **162 backend tests passed**; React production build, живой Uvicorn smoke всех шести демо-сценариев, пяти ML-предиктов и цикла расследования (комментарий + ML assessment) прошли. Предупреждение Starlette TestClient о будущей deprecation известно и не скрывается.
 
 ## API и данные
 
