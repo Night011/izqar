@@ -2,3 +2,6 @@
 izqar_ieee_v4/
 izqar_ieee_v4b/
 *.log
+izqar_paysim_v6/
+paysim_v6_threshold_policies.json
+outputs_v7_keep_metrics_only
