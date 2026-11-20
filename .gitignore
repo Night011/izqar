@@ -19,3 +19,4 @@ frontend/*.tsbuildinfo
 
 # CatBoost training metadata
 catboost_info/
+kaggle/outputs_v7/
