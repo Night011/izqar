@@ -12,7 +12,8 @@
 | Презентация PPTX (Google Slides) | [docs/presentation/IZQAR-hackathon.pptx](presentation/IZQAR-hackathon.pptx) | 8 слайдов, проверена рендером |
 | Презентация PDF | [docs/presentation/IZQAR-hackathon.pdf](presentation/IZQAR-hackathon.pdf) | 8 страниц, сверена с PPTX |
 | Текст слайдов и речь | [PRESENTATION.md](PRESENTATION.md) | готово |
-| Сценарий видео 2–4 минуты | [DEMO_VIDEO_SCRIPT.md](DEMO_VIDEO_SCRIPT.md) | готово |
+| Сценарий видео 2–4 минуты | [DEMO_VIDEO_SCRIPT.md](DEMO_VIDEO_SCRIPT.md) | готово; запись не выполнялась |
+| Прямые ссылки для формы | [SUBMISSION_LINKS.md](SUBMISSION_LINKS.md) | проверены анонимно |
 | Сценарий показа на 5 минут | [JURY_DEMO.md](JURY_DEMO.md) | проверен на живом стенде |
 | Скриншоты приложения | [screenshots/](screenshots/) (5 PNG) | сняты с работающего приложения |
 | Архитектура | [ARCHITECTURE.md](ARCHITECTURE.md) | актуальна |
